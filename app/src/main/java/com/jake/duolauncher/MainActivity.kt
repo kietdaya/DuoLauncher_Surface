@@ -153,6 +153,8 @@ class MainActivity : ComponentActivity() {
     }
 
     internal fun openSystemShade(panel: ShadePanel) {
+        // Android 12L lets a launcher open the shade itself; accessibility is only the fallback.
+        if (expandShadeDirectly(panel)) return
         when (SystemShadeAccessibilityService.open(this, panel)) {
             ShadeOpenResult.OPENED -> Unit
             ShadeOpenResult.SERVICE_DISABLED -> showShadeSetup()
@@ -161,6 +163,19 @@ class MainActivity : ComponentActivity() {
             ShadeOpenResult.ACTION_REJECTED -> Toast.makeText(this,
                 "Android couldn’t open the system panel.", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /**
+     * Opens the shade through StatusBarManager, as most launchers do. It needs only the normal
+     * EXPAND_STATUS_BAR permission, so no accessibility service. Returns false if Android refuses.
+     */
+    @android.annotation.SuppressLint("WrongConstant", "PrivateApi", "DiscouragedPrivateApi", "SoonBlockedPrivateApi", "BlockedPrivateApi")
+    private fun expandShadeDirectly(panel: ShadePanel): Boolean = try {
+        val statusBar = getSystemService("statusbar")
+        val name = if (panel == ShadePanel.NOTIFICATIONS) "expandNotificationsPanel" else "expandSettingsPanel"
+        if (statusBar == null) false else { statusBar.javaClass.getMethod(name).invoke(statusBar); true }
+    } catch (_: Throwable) {
+        false
     }
 
     private fun showShadeSetup() {
