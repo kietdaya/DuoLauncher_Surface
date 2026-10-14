@@ -11,7 +11,7 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
-    <application android:label="Duo Launcher" android:icon="@drawable/ic_launcher"
+    <application android:label="Duo Dev" android:icon="@drawable/ic_launcher"
         android:name=".DuoApplication"
         android:theme="@style/Theme.Duo" android:allowBackup="false" android:supportsRtl="true">
         <property android:name="android.window.PROPERTY_ACTIVITY_EMBEDDING_SPLITS_ENABLED" android:value="true" />

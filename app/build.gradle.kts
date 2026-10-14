@@ -31,6 +31,11 @@ val releaseStoreFile = releaseSigningValues["DUO_RELEASE_STORE_FILE"]?.let { con
     }
 }
 
+// Optional fixed debug key, so each CI build can update the previous one in place.
+// CI decodes the DUO_DEBUG_KEYSTORE secret to this path; without it, the default debug key is used.
+val debugStoreFile = System.getenv("DUO_DEBUG_STORE_FILE")?.takeIf { it.isNotBlank() }
+    ?.let { file(it) }?.takeIf { it.isFile && it.canRead() }
+
 android {
     namespace = "com.jake.duolauncher"
     compileSdk = 36
@@ -43,6 +48,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
+        if (debugStoreFile != null) {
+            getByName("debug") {
+                storeFile = debugStoreFile
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         if (releaseStoreFile != null) {
             create("release") {
                 storeFile = releaseStoreFile
