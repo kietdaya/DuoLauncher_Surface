@@ -156,6 +156,17 @@ class MainActivity : ComponentActivity() {
         // The Surface Duo's system UI crashes and restarts when an app opens Quick Settings directly,
         // whichever way it is asked. Open notifications instead; Quick Settings is one more pull down.
         val panel = if (isSurfaceDuo) ShadePanel.NOTIFICATIONS else requested
+        if (isSurfaceDuo && model.state.value.verticalStatus) {
+            // The Duo's system UI can't expand the shade while our window hides the status bar.
+            // Bring the bar back first; it hides again when Home regains focus after the shade closes.
+            WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
+            window.decorView.postDelayed({ openShadePanel(panel) }, 200)
+            return
+        }
+        openShadePanel(panel)
+    }
+
+    private fun openShadePanel(panel: ShadePanel) {
         // Android 12L lets a launcher open the shade itself; accessibility is only the fallback.
         if (expandShadeDirectly(panel)) return
         when (SystemShadeAccessibilityService.open(this, panel)) {
