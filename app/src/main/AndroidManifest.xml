@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Feed page: read the calendar Outlook syncs to the Duo, and fetch weather from Open-Meteo. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <queries>
         <package android:name="com.google.android.googlequicksearchbox" />
         <intent>
@@ -27,6 +30,15 @@
             android:permission="android.permission.BIND_WALLPAPER" android:exported="true">
             <intent-filter><action android:name="android.service.wallpaper.WallpaperService" /></intent-filter>
             <meta-data android:name="android.service.wallpaper" android:resource="@xml/dune_wallpaper" />
+        </service>
+        <!-- Lets the feed see what's playing; it never reads notification content. -->
+        <service android:name=".NowPlayingListenerService"
+            android:label="@string/now_playing_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
         <service android:name=".SystemShadeAccessibilityService"
             android:label="@string/shade_service_label"

@@ -186,6 +186,9 @@ fun LauncherScreen(
     val pendingNewPage = widgets.pendingPlacement?.page == homePages
     val visibleHomePages = homePages + if (drag.active || widgetSession != null || pendingNewPage) 1 else 0
     var expandedWorkspace by remember { mutableStateOf(false) }
+    // On a Surface Duo the left page shows the feed, so nothing may be placed on it.
+    var feedOnLeading by remember { mutableStateOf(false) }
+    val leadingUsable = expandedWorkspace && !feedOnLeading
     val firstHome = if (DiscoverBounds.available) 1 else 0
     val pageCount = visibleHomePages + 1
     val nativePager = rememberPagerState(initialPage = savedPage.coerceIn(-firstHome, pageCount - 1) + firstHome, pageCount = { pageCount + firstHome })
@@ -300,9 +303,9 @@ fun LauncherScreen(
     val openLibrary = { scope.launch { pager.animateScrollToPage(homePages) }; Unit }
 
     val dragWindowPage = if (expandedWorkspace && (drag.active || widgetSession != null)) pager.settledPage else pager.currentPage
-    val eligibleDragPages = remember(expandedWorkspace, dragWindowPage, visibleHomePages) {
+    val eligibleDragPages = remember(expandedWorkspace, leadingUsable, dragWindowPage, visibleHomePages) {
         if (expandedWorkspace && dragWindowPage in 0 until visibleHomePages) {
-            setOfNotNull((dragWindowPage - 1).takeIf { it >= -1 }, dragWindowPage)
+            setOfNotNull((dragWindowPage - 1).takeIf { it >= if (leadingUsable) -1 else 0 }, dragWindowPage)
         } else setOf(dragWindowPage)
     }
     val rawTarget = if (drag.active) drag.destination(drag.pointer, eligibleDragPages)?.target else null
@@ -445,7 +448,7 @@ fun LauncherScreen(
                 resizeAppPitch = with(density) { geometry.rowHeight.dp.toPx() }
             }
             LaunchedEffect(geometry.gridWidth, geometry.widgetHeight, geometry.rowHeight) { resizeSlot = null }
-            SideEffect { expandedWorkspace = geometry.expanded }
+            SideEffect { expandedWorkspace = geometry.expanded; feedOnLeading = split != null }
             LaunchedEffect(geometry.expanded) {
                 if (!geometry.expanded) {
                     val sessionTargetsLeading = widgetSession?.let { session ->
@@ -544,6 +547,8 @@ fun LauncherScreen(
                         nativePager = nativePager, motion = workspaceMotion!!, firstHome = firstHome,
                         visibleHomePages = visibleHomePages, panelWidth = panelWidth,
                         dualScreen = split != null,
+                        feedLatitude = appearance.latitude, feedLongitude = appearance.longitude,
+                        onSetPlace = { sheet = "settings:wallpaper" },
                         contentHeight = contentHeight, bottomSpace = bottomSpace, geometry = geometry,
                         state = state, previewSlots = previewLayout.slots, previewLeadingSlots = previewLayout.leadingSlots,
                         previewWidgetPlacements = previewLayout.widgetPlacements, appsById = appsById,
@@ -805,8 +810,8 @@ fun LauncherScreen(
                             }
                             val requestedIndex = existing?.let { homeCellIndex(it.page, it.row * GRID_COLUMNS + it.column) }
                                 ?: widgetTargetIndex.takeUnless { it == Int.MIN_VALUE } ?: 0
-                            val requestedPage = homeCellPage(requestedIndex).coerceIn(if (expandedWorkspace) -1 else 0, homePages)
-                            val availablePages = (if (expandedWorkspace) -1 else 0)..homePages
+                            val requestedPage = homeCellPage(requestedIndex).coerceIn(if (leadingUsable) -1 else 0, homePages)
+                            val availablePages = (if (leadingUsable) -1 else 0)..homePages
                             val autoPages = (listOf(requestedPage) + availablePages.filter { it != requestedPage })
                             val freeIndex = if (existing != null || widgetExactTarget) requestedIndex.takeIf {
                                 widgetCandidate(state.layout, widgetSlot, it, span.width, span.height) != null
@@ -835,8 +840,8 @@ fun LauncherScreen(
                         val requested = existing?.let {
                             homeCellIndex(it.page, it.row * GRID_COLUMNS + it.column)
                         } ?: widgetTargetIndex.takeUnless { it == Int.MIN_VALUE } ?: 0
-                        val requestedPage = homeCellPage(requested).coerceIn(if (expandedWorkspace) -1 else 0, homePages)
-                        val availablePages = (if (expandedWorkspace) -1 else 0)..homePages
+                        val requestedPage = homeCellPage(requested).coerceIn(if (leadingUsable) -1 else 0, homePages)
+                        val availablePages = (if (leadingUsable) -1 else 0)..homePages
                         val candidates = if (model.placement(widgetSlot) != null || widgetExactTarget) sequenceOf(requested)
                             else (listOf(requestedPage) + availablePages.filter { it != requestedPage }).asSequence()
                                 .flatMap { page -> (0 until HOME_CELLS).asSequence().map { homeCellIndex(page, it) } }
@@ -903,7 +908,7 @@ fun LauncherScreen(
                                 modifier = Modifier.testTag("widget-replacement-locked"))
                             val targetPage = homeCellPage(session.targetIndex ?: 0)
                             if (!session.dragging && session.candidate == null) IconButton(
-                                enabled = targetPage > if (expandedWorkspace) -1 else 0, onClick = {
+                                enabled = targetPage > if (leadingUsable) -1 else 0, onClick = {
                                 val local = homeCellLocal(session.targetIndex ?: 0)
                                 val page = targetPage - 1
                                 widgetSession = session.copy(targetIndex = homeCellIndex(page, local))
@@ -1140,7 +1145,7 @@ fun LauncherScreen(
                     items(state.apps.filter { it.id != firstId && it.available }, key = { it.id }) { second ->
                         TextButton(onClick = {
                             val preferredPage = state.layout.indexOfShortcut(firstId)?.let(::homeCellPage)
-                                ?.takeIf { it >= 0 || expandedWorkspace } ?: lastHomePage.coerceIn(0, homePages - 1)
+                                ?.takeIf { it >= 0 || leadingUsable } ?: lastHomePage.coerceIn(0, homePages - 1)
                             val blocked = state.widgetPlacements.flatMapTo(mutableSetOf()) { it.coveredIndices() }
                             val targetIndex = (0 until HOME_CELLS).map { homeCellIndex(preferredPage, it) }
                                 .firstOrNull { it !in blocked && state.layout.slotAt(it) in listOf(null, firstId, second.id) }
@@ -1155,7 +1160,7 @@ fun LauncherScreen(
         openFolderId?.let { id ->
             state.folders.firstOrNull { it.id == id }?.let { folder ->
                 val blocked = state.widgetPlacements.flatMapTo(mutableSetOf()) { it.coveredIndices() }
-                val destinationPages = (if (expandedWorkspace) listOf(-1) else emptyList()) + (0 until homePages)
+                val destinationPages = (if (leadingUsable) listOf(-1) else emptyList()) + (0 until homePages)
                 val homeDestinations = destinationPages.mapNotNull { destinationPage ->
                     (0 until HOME_CELLS).map { homeCellIndex(destinationPage, it) }
                         .firstOrNull { it !in blocked && state.layout.slotAt(it) == null }
@@ -1226,6 +1231,9 @@ private fun ExpandedWorkspace(
     visibleHomePages: Int,
     panelWidth: Dp,
     dualScreen: Boolean,
+    feedLatitude: Double?,
+    feedLongitude: Double?,
+    onSetPlace: () -> Unit,
     contentHeight: Dp,
     bottomSpace: Dp,
     geometry: HomeGeometry,
@@ -1310,7 +1318,12 @@ private fun ExpandedWorkspace(
         }
 
         if (showLeading) {
-            key("expanded-leading-home") {
+            if (dualScreen) key("duo-feed") {
+                // Surface Duo: the left page is the feed, one full screen wide.
+                Box(Modifier.place(leadingX).width(geometry.homeWidth.dp).fillMaxHeight()) {
+                    FeedPage(feedLatitude, feedLongitude, onSetPlace)
+                }
+            } else key("expanded-leading-home") {
                 Box(Modifier.place(leadingX).width((geometry.gridWidth + 16f).dp).fillMaxHeight()
                     .testTag("expanded-leading-home")) {
                     HomePagePane(

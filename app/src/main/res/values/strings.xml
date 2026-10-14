@@ -1,5 +1,6 @@
 <resources>
     <string name="dune_wallpaper_description">Duo dunes — the launcher’s landscape, sized for your display.</string>
+    <string name="now_playing_listener_label">Duo Dev now playing</string>
     <string name="shade_service_label">Duo Launcher shade gestures</string>
     <string name="shade_service_description">Allows Duo Launcher’s Home screen gestures to open the system notifications and Quick Settings panels. It does not read screen content or observe activity in other apps.</string>
 </resources>
