@@ -1,6 +1,14 @@
 package com.jake.duolauncher
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.location.Geocoder
+import android.location.Location
+import android.location.LocationManager
+import android.os.CancellationSignal
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import android.content.ComponentName
 import android.content.ContentUris
 import android.content.Context
@@ -15,7 +23,8 @@ import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.provider.CalendarContract
 import android.service.notification.NotificationListenerService
-import androidx.core.app.NotificationManagerCompat
+import android.app.Notification
+import android.service.notification.StatusBarNotification
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -114,22 +123,89 @@ suspend fun loadFeedWeather(latitude: Double, longitude: Double): FeedWeather? =
     }.getOrNull() ?: FeedWeatherCache.value
 }
 
+// ---------- Place for weather ----------
+
+/** Where weather is shown for: set once by tapping Sync, never tracked in the background. */
+data class FeedPlace(val latitude: Double, val longitude: Double, val name: String)
+
+object FeedPlaceStore {
+    private fun prefs(context: Context) = context.getSharedPreferences("feed", Context.MODE_PRIVATE)
+    fun load(context: Context): FeedPlace? = prefs(context).takeIf { it.contains("lat") }?.let {
+        FeedPlace(Double.fromBits(it.getLong("lat", 0)), Double.fromBits(it.getLong("lon", 0)), it.getString("name", "") ?: "")
+    }
+    fun save(context: Context, place: FeedPlace) = prefs(context).edit()
+        .putLong("lat", place.latitude.toRawBits()).putLong("lon", place.longitude.toRawBits()).putString("name", place.name).apply()
+}
+
+fun hasLocationAccess(context: Context) =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+/**
+ * Reads the Duo's approximate location once, names the town, and saves it for weather.
+ * Returns null when Location is off or nothing answers in time.
+ */
+@SuppressLint("MissingPermission")
+suspend fun syncFeedPlace(context: Context): FeedPlace? {
+    if (!hasLocationAccess(context)) return null
+    val manager = context.getSystemService(LocationManager::class.java)
+    val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.FUSED_PROVIDER, LocationManager.GPS_PROVIDER)
+        .firstOrNull { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) } ?: return null
+    val location = withTimeoutOrNull(20_000L) {
+        suspendCancellableCoroutine<Location?> { cont ->
+            val signal = CancellationSignal()
+            cont.invokeOnCancellation { signal.cancel() }
+            manager.getCurrentLocation(provider, signal, context.mainExecutor) { if (cont.isActive) cont.resume(it) }
+        }
+    } ?: runCatching { manager.getLastKnownLocation(provider) }.getOrNull() ?: return null
+    val name = withContext(Dispatchers.IO) {
+        runCatching {
+            @Suppress("DEPRECATION")
+            Geocoder(context, Locale.getDefault()).getFromLocation(location.latitude, location.longitude, 1)
+                ?.firstOrNull()?.let { it.locality ?: it.subAdminArea ?: it.adminArea }
+        }.getOrNull()
+    } ?: ""
+    return FeedPlace(location.latitude, location.longitude, name).also { FeedPlaceStore.save(context, it) }
+}
+
 // ---------- Now playing ----------
 
 /**
  * Android only shares other apps' media sessions with an app the user has allowed as a
- * notification listener. This service exists for that permission; it doesn't read notifications.
+ * notification listener. This service exists for that permission. The only thing it takes from
+ * notifications is the media session a player attaches to its playback notification, which is how
+ * apps like YouTube and YouTube Music announce themselves; it reads no notification text.
  */
-class NowPlayingListenerService : NotificationListenerService()
+class NowPlayingListenerService : NotificationListenerService() {
+    override fun onListenerConnected() {
+        runCatching { activeNotifications.forEach(::remember) }
+    }
+    override fun onNotificationPosted(sbn: StatusBarNotification) = remember(sbn)
+    override fun onNotificationRemoved(sbn: StatusBarNotification) = NowPlayingTokens.remove(sbn.key)
 
-fun hasNowPlayingAccess(context: Context) =
-    context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
-
-fun openNowPlayingSettings(context: Context) {
-    runCatching {
-        context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    private fun remember(sbn: StatusBarNotification) {
+        @Suppress("DEPRECATION")
+        val token = sbn.notification.extras.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
+        if (token != null) NowPlayingTokens.put(sbn.key, token) else NowPlayingTokens.remove(sbn.key)
     }
 }
+
+/** Media sessions announced through playback notifications, shared with the feed. */
+object NowPlayingTokens {
+    private val tokens = linkedMapOf<String, MediaSession.Token>()
+    private val listeners = mutableSetOf<() -> Unit>()
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    fun all(): List<MediaSession.Token> = synchronized(tokens) { tokens.values.toList() }
+    fun put(key: String, token: MediaSession.Token) { synchronized(tokens) { tokens[key] = token }; notifyChanged() }
+    fun remove(key: String) { if (synchronized(tokens) { tokens.remove(key) } != null) notifyChanged() }
+    fun listen(listener: () -> Unit) { main.post { listeners += listener } }
+    fun unlisten(listener: () -> Unit) { main.post { listeners -= listener } }
+    private fun notifyChanged() = main.post { listeners.toList().forEach { it() } }
+}
+
+private fun listenerComponent(context: Context) = ComponentName(context, NowPlayingListenerService::class.java)
+
+fun hasNowPlayingAccess(context: Context) =
+    context.getSystemService(android.app.NotificationManager::class.java).isNotificationListenerAccessGranted(listenerComponent(context))
 
 data class NowPlaying(
     val controller: MediaController, val title: String, val artist: String, val art: Bitmap?,
@@ -148,20 +224,28 @@ data class NowPlaying(
  */
 class NowPlayingTracker(private val context: Context, private val onChange: (NowPlaying?) -> Unit) {
     private val manager = context.getSystemService(MediaSessionManager::class.java)
-    private val listenerComponent = ComponentName(context, NowPlayingListenerService::class.java)
+    private val listenerComponent = listenerComponent(context)
     // Keyed by session token: Android hands out new MediaController objects for the same session.
     private val callbacks = mutableMapOf<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
     private val pausedAt = mutableMapOf<String, Long>()
-    private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { watch(it.orEmpty()) }
-    private val pausedGraceMs = 5 * 60_000L
+    private var activeSessions: List<MediaController> = emptyList()
+    private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { activeSessions = it.orEmpty(); watchAll() }
+    private val tokensListener: () -> Unit = { watchAll() }
+    /** A paused track stays briefly so you can resume it, then the panel goes away. */
+    private val pausedGraceMs = 60_000L
 
     fun start(): Boolean = runCatching {
+        // After an app update Android can leave the listener unbound; ask it to reconnect.
+        NotificationListenerService.requestRebind(listenerComponent)
         manager.addOnActiveSessionsChangedListener(sessionsListener, listenerComponent)
-        watch(manager.getActiveSessions(listenerComponent))
+        activeSessions = manager.getActiveSessions(listenerComponent)
+        NowPlayingTokens.listen(tokensListener)
+        watchAll()
         true
     }.getOrElse { onChange(null); false }
 
     fun stop() {
+        NowPlayingTokens.unlisten(tokensListener)
         runCatching { manager.removeOnActiveSessionsChangedListener(sessionsListener) }
         callbacks.values.forEach { (controller, callback) -> controller.unregisterCallback(callback) }
         callbacks.clear()
@@ -169,6 +253,14 @@ class NowPlayingTracker(private val context: Context, private val onChange: (Now
 
     /** Re-evaluate, e.g. once a minute, so a long-paused session drops off. */
     fun refresh() = onChange(pick(callbacks.values.map { it.first }))
+
+    /** Sessions from Android's active list plus any announced only through a playback notification. */
+    private fun watchAll() {
+        val known = activeSessions.map { it.sessionToken }.toSet()
+        val fromNotifications = NowPlayingTokens.all().filter { it !in known }
+            .mapNotNull { runCatching { MediaController(context, it) }.getOrNull() }
+        watch(activeSessions + fromNotifications)
+    }
 
     private fun watch(controllers: List<MediaController>) {
         val live = controllers.map { it.sessionToken }.toSet()
@@ -179,7 +271,11 @@ class NowPlayingTracker(private val context: Context, private val onChange: (Now
             val callback = object : MediaController.Callback() {
                 override fun onPlaybackStateChanged(state: PlaybackState?) = refresh()
                 override fun onMetadataChanged(metadata: MediaMetadata?) = refresh()
-                override fun onSessionDestroyed() = refresh()
+                override fun onSessionDestroyed() {
+                    // A closed player can leave a stale "playing" state behind; drop it right away.
+                    callbacks.remove(controller.sessionToken)?.let { (c, cb) -> c.unregisterCallback(cb) }
+                    refresh()
+                }
             }
             controller.registerCallback(callback)
             callbacks[controller.sessionToken] = controller to callback

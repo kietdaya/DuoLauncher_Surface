@@ -547,8 +547,7 @@ fun LauncherScreen(
                         nativePager = nativePager, motion = workspaceMotion!!, firstHome = firstHome,
                         visibleHomePages = visibleHomePages, panelWidth = panelWidth,
                         dualScreen = split != null,
-                        feedLatitude = appearance.latitude, feedLongitude = appearance.longitude,
-                        onSetPlace = { sheet = "settings:wallpaper" },
+                        feedLatitude = appearance.latitude, feedLongitude = appearance.longitude, feedPlaceName = appearance.place,
                         contentHeight = contentHeight, bottomSpace = bottomSpace, geometry = geometry,
                         state = state, previewSlots = previewLayout.slots, previewLeadingSlots = previewLayout.leadingSlots,
                         previewWidgetPlacements = previewLayout.widgetPlacements, appsById = appsById,
@@ -1233,7 +1232,7 @@ private fun ExpandedWorkspace(
     dualScreen: Boolean,
     feedLatitude: Double?,
     feedLongitude: Double?,
-    onSetPlace: () -> Unit,
+    feedPlaceName: String,
     contentHeight: Dp,
     bottomSpace: Dp,
     geometry: HomeGeometry,
@@ -1321,7 +1320,7 @@ private fun ExpandedWorkspace(
             if (dualScreen) key("duo-feed") {
                 // Surface Duo: the left page is the feed, one full screen wide.
                 Box(Modifier.place(leadingX).width(geometry.homeWidth.dp).fillMaxHeight()) {
-                    FeedPage(feedLatitude, feedLongitude, onSetPlace)
+                    FeedPage(feedLatitude, feedLongitude, feedPlaceName)
                 }
             } else key("expanded-leading-home") {
                 Box(Modifier.place(leadingX).width((geometry.gridWidth + 16f).dp).fillMaxHeight()

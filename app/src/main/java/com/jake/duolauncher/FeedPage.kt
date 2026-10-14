@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -84,7 +85,7 @@ private val Mono = FontFamily.Monospace
  * what's playing. Now playing only appears while something plays; the calendar takes its room otherwise.
  */
 @Composable
-internal fun FeedPage(latitude: Double?, longitude: Double?, onSetPlace: () -> Unit, modifier: Modifier = Modifier) {
+internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val style = FeedStyle.of(LocalDuoPalette.current)
     val use24h = DateFormat.is24HourFormat(context)
@@ -111,17 +112,37 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, onSetPlace: () -> U
     var events by remember { mutableStateOf(emptyList<FeedEvent>()) }
     LaunchedEffect(calendarAllowed, window, resumes, minute) { events = loadFeedEvents(context, window.start, window.end) }
 
+    // Weather place: the one saved by tapping Sync, else the sunrise/sunset place if there is one.
+    var synced by remember { mutableStateOf(FeedPlaceStore.load(context)) }
+    val place = synced ?: if (latitude != null && longitude != null) FeedPlace(latitude, longitude, placeName) else null
+    var syncing by remember { mutableStateOf(false) }
+    var syncFailed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val runSync: () -> Unit = {
+        if (!syncing) scope.launch {
+            syncing = true; syncFailed = false
+            val result = syncFeedPlace(context)
+            if (result != null) synced = result else syncFailed = true
+            syncing = false
+        }
+    }
+    val requestLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) runSync() else syncFailed = true
+    }
+    val onSync = { if (hasLocationAccess(context)) runSync() else requestLocation.launch(Manifest.permission.ACCESS_COARSE_LOCATION) }
+
     var weather by remember { mutableStateOf(FeedWeatherCache.value) }
     var weatherLoaded by remember { mutableStateOf(false) }
-    LaunchedEffect(latitude, longitude, resumes) {
-        if (latitude != null && longitude != null) weather = loadFeedWeather(latitude, longitude)
+    LaunchedEffect(place?.latitude, place?.longitude, resumes) {
+        if (place != null) weather = loadFeedWeather(place.latitude, place.longitude)
         weatherLoaded = true
     }
 
     var nowPlaying by remember { mutableStateOf<NowPlaying?>(null) }
     var tracker by remember { mutableStateOf<NowPlayingTracker?>(null) }
     DisposableEffect(nowPlayingAllowed) {
-        val t = if (nowPlayingAllowed) NowPlayingTracker(context) { nowPlaying = it }.takeIf { it.start() } else null
+        // Always try: if access is missing Android refuses quietly and nothing shows. Restarts when access changes.
+        val t = NowPlayingTracker(context) { nowPlaying = it }.takeIf { it.start() }
         if (t == null) nowPlaying = null
         tracker = t
         onDispose { t?.stop() }
@@ -131,8 +152,8 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, onSetPlace: () -> U
     Column(modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp).testTag("feed-page"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         FeedHeader(now, use24h, style)
-        WeatherPanel(weather, hasPlace = latitude != null && longitude != null, loaded = weatherLoaded, use24h = use24h,
-            style = style, onSetPlace = onSetPlace)
+        WeatherPanel(weather, place, loaded = weatherLoaded, syncing = syncing, syncFailed = syncFailed, use24h = use24h,
+            style = style, onSync = onSync)
         CalendarPanel(events, window, now, calendarAllowed, use24h, style, Modifier.weight(1f),
             onAllow = { requestCalendar.launch(Manifest.permission.READ_CALENDAR) },
             onOpen = { openCalendarEvent(context, it) })
@@ -141,9 +162,6 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, onSetPlace: () -> U
             val last = remember { arrayOfNulls<NowPlaying>(1) }
             nowPlaying?.let { last[0] = it }
             last[0]?.let { NowPlayingPanel(it, style) }
-        }
-        if (!nowPlayingAllowed) FeedKey("Show what's playing here", style, Modifier.fillMaxWidth(), light = false) {
-            openNowPlayingSettings(context)
         }
     }
 }
@@ -202,22 +220,31 @@ private fun hourLabel(hourOfDay: Int, use24h: Boolean) =
 // ---------- Weather ----------
 
 @Composable
-private fun WeatherPanel(weather: FeedWeather?, hasPlace: Boolean, loaded: Boolean, use24h: Boolean, style: FeedStyle, onSetPlace: () -> Unit) {
+private fun WeatherPanel(weather: FeedWeather?, place: FeedPlace?, loaded: Boolean, syncing: Boolean, syncFailed: Boolean,
+    use24h: Boolean, style: FeedStyle, onSync: () -> Unit) {
     FeedPanel(style, Modifier.testTag("feed-weather")) {
-        if (!hasPlace) {
-            PanelLabel("Weather", "", style)
-            Text("Set a place in Wallpaper & appearance to see weather here.", color = style.muted, fontSize = 13.sp,
-                modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
-            FeedKey("Set place", style, Modifier.fillMaxWidth(), height = 40.dp, onClick = onSetPlace)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(("Weather" + (place?.name?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")).uppercase(), Modifier.weight(1f),
+                color = style.muted, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.6.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Reads the location once, only on tap. Nothing runs in the background.
+            Text(if (syncing) "SYNCING…" else "↻ SYNC", Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !syncing, onClick = onSync)
+                .padding(horizontal = 8.dp, vertical = 4.dp).testTag("feed-weather-sync"),
+                color = if (syncing) style.muted else style.ink, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.6.sp)
+        }
+        if (syncFailed) Text("Couldn't get your location. Turn on Location for a moment, then tap Sync.", color = style.muted,
+            fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        if (place == null) {
+            Text("Tap Sync to show weather for where you are. Your location is read once, only when you tap.",
+                color = style.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp))
+            FeedKey(if (syncing) "Syncing…" else "Sync location", style, Modifier.fillMaxWidth(), height = 40.dp, onClick = onSync)
             return@FeedPanel
         }
         if (weather == null) {
-            PanelLabel("Weather", "", style)
             Text(if (loaded) "Weather is unavailable right now." else "Loading weather…", color = style.muted, fontSize = 13.sp,
                 modifier = Modifier.padding(top = 8.dp))
             return@FeedPanel
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             TemperatureDial(temperatureFraction(weather.temperature, weather.low, weather.high), style, Modifier.size(74.dp))
             Text("${Math.round(weather.temperature)}°", color = style.ink, fontSize = 40.sp, fontWeight = FontWeight.Normal)
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
