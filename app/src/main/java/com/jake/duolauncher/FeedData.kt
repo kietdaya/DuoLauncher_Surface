@@ -176,16 +176,28 @@ suspend fun syncFeedPlace(context: Context): FeedPlace? {
  * apps like YouTube and YouTube Music announce themselves; it reads no notification text.
  */
 class NowPlayingListenerService : NotificationListenerService() {
+    // These run inside the launcher's process for every notification on the phone, so nothing here
+    // may ever throw: an exception would take Home down with it.
     override fun onListenerConnected() {
-        runCatching { activeNotifications.forEach(::remember) }
+        try { activeNotifications?.forEach(::remember) } catch (_: Throwable) { }
     }
-    override fun onNotificationPosted(sbn: StatusBarNotification) = remember(sbn)
-    override fun onNotificationRemoved(sbn: StatusBarNotification) = NowPlayingTokens.remove(sbn.key)
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        if (sbn != null) remember(sbn)
+    }
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        try { sbn?.key?.let(NowPlayingTokens::remove) } catch (_: Throwable) { }
+    }
 
     private fun remember(sbn: StatusBarNotification) {
-        @Suppress("DEPRECATION")
-        val token = sbn.notification.extras.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
-        if (token != null) NowPlayingTokens.put(sbn.key, token) else NowPlayingTokens.remove(sbn.key)
+        try {
+            // Only playback notifications matter. Reading extras decodes the app's data, which can fail
+            // for notifications carrying an app's private types, so this stays inside the try.
+            val notification = sbn.notification ?: return
+            @Suppress("DEPRECATION")
+            val token = notification.extras?.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
+            if (token != null) NowPlayingTokens.put(sbn.key, token) else NowPlayingTokens.remove(sbn.key)
+        } catch (_: Throwable) {
+        }
     }
 }
 
@@ -229,14 +241,14 @@ class NowPlayingTracker(private val context: Context, private val onChange: (Now
     private val callbacks = mutableMapOf<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
     private val pausedAt = mutableMapOf<String, Long>()
     private var activeSessions: List<MediaController> = emptyList()
-    private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { activeSessions = it.orEmpty(); watchAll() }
-    private val tokensListener: () -> Unit = { watchAll() }
+    private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener {
+        activeSessions = it.orEmpty(); runCatching { watchAll() }
+    }
+    private val tokensListener: () -> Unit = { runCatching { watchAll() } }
     /** A paused track stays briefly so you can resume it, then the panel goes away. */
     private val pausedGraceMs = 60_000L
 
     fun start(): Boolean = runCatching {
-        // After an app update Android can leave the listener unbound; ask it to reconnect.
-        NotificationListenerService.requestRebind(listenerComponent)
         manager.addOnActiveSessionsChangedListener(sessionsListener, listenerComponent)
         activeSessions = manager.getActiveSessions(listenerComponent)
         NowPlayingTokens.listen(tokensListener)
@@ -252,7 +264,7 @@ class NowPlayingTracker(private val context: Context, private val onChange: (Now
     }
 
     /** Re-evaluate, e.g. once a minute, so a long-paused session drops off. */
-    fun refresh() = onChange(pick(callbacks.values.map { it.first }))
+    fun refresh() = onChange(runCatching { pick(callbacks.values.map { it.first }) }.getOrNull())
 
     /** Sessions from Android's active list plus any announced only through a playback notification. */
     private fun watchAll() {
