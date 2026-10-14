@@ -1,7 +1,6 @@
 package com.jake.duolauncher
 
 import android.app.Activity
-import android.content.pm.ApplicationInfo
 import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -12,7 +11,7 @@ import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowMetricsCalculator
 
-/** Where the hinge measurement came from. Shown in the debug readout. */
+/** Where the hinge measurement came from. */
 enum class HingeSource(val label: String) {
     WINDOW_MANAGER("WindowManager"),
     SURFACE_DUO_FALLBACK("Surface Duo fallback"),
@@ -68,16 +67,4 @@ internal fun rememberDuoHinge(activity: Activity): DuoHinge? {
         surfaceDuoFallback(activity)
     }
     return reported ?: fallback
-}
-
-/** True for debug builds, where the hinge readout is shown. */
-internal fun Activity.isDebuggableBuild(): Boolean =
-    (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-
-/** One line for the debug readout: what was detected and how the Home box was split. */
-internal fun duoHingeReadout(hinge: DuoHinge?, split: DualScreenSplit?): String = when {
-    hinge == null -> "Duo · one screen, no hinge reported"
-    split == null -> "Duo · hinge ${hinge.left}–${hinge.right}px (${hinge.source.label}) · not split"
-    else -> "Duo · hinge ${hinge.left}–${hinge.right}px (${hinge.source.label}) · " +
-        "screens ${split.screenWidth.toInt()}dp, stride ${split.stride.toInt()}dp"
 }

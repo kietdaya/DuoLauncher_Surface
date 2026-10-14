@@ -75,11 +75,20 @@ class AppearanceStore(private val context: Context) {
 object DuoAppearanceRuntime { @Volatile var dark: Boolean = false }
 
 data class DuoPalette(val ink: androidx.compose.ui.graphics.Color, val glass: androidx.compose.ui.graphics.Color,
-    val backgroundTop: androidx.compose.ui.graphics.Color, val backgroundBottom: androidx.compose.ui.graphics.Color, val dark: Boolean)
+    val backgroundTop: androidx.compose.ui.graphics.Color, val backgroundBottom: androidx.compose.ui.graphics.Color, val dark: Boolean,
+    /** Dock fill and edge, or null to use the default glass dock. */
+    val dockFill: androidx.compose.ui.graphics.Color? = null,
+    val dockEdge: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
+    /** Colour of the battery ring on the status rail. */
+    val accent: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.White)
 val LightDuoPalette = DuoPalette(androidx.compose.ui.graphics.Color(0xFF243A46), androidx.compose.ui.graphics.Color(0xFFE8EFF2),
     androidx.compose.ui.graphics.Color(0xFF41687E), androidx.compose.ui.graphics.Color(0xFFD8CEB6), false)
-val DarkDuoPalette = DuoPalette(androidx.compose.ui.graphics.Color(0xFFEAF3F6), androidx.compose.ui.graphics.Color(0xFF263A43),
-    androidx.compose.ui.graphics.Color(0xFF132832), androidx.compose.ui.graphics.Color(0xFF463F35), true)
+/** KO II dark: matte graphite body, a frosted see-through dock like the iPhone's, orange only on the battery ring. */
+val DarkDuoPalette = DuoPalette(androidx.compose.ui.graphics.Color(0xFFECEBE6), androidx.compose.ui.graphics.Color(0xFF232427),
+    androidx.compose.ui.graphics.Color(0xFF0F1011), androidx.compose.ui.graphics.Color(0xFF1C1D1F), true,
+    dockFill = androidx.compose.ui.graphics.Color.White.copy(alpha = .12f),
+    dockEdge = androidx.compose.ui.graphics.Color.White.copy(alpha = .16f),
+    accent = androidx.compose.ui.graphics.Color(0xFFFF5A1F))
 val LocalDuoPalette = staticCompositionLocalOf { LightDuoPalette }
 
 @Composable

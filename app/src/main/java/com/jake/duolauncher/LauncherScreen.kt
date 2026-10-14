@@ -110,9 +110,9 @@ private fun findFreeWidgetIndex(layout: HomeLayout, page: Int, spanX: Int, spanY
 fun DuoTheme(dark: Boolean = false, content: @Composable () -> Unit) {
     val palette = if (dark) DarkDuoPalette else LightDuoPalette
     CompositionLocalProvider(LocalDuoPalette provides palette) {
-        MaterialTheme(colorScheme = if (dark) darkColorScheme(primary = Color(0xFF9BC5D7), onPrimary = Color(0xFF12303D),
-            surface = Color(0xFF17272E), onSurface = palette.ink, secondary = Color(0xFFD1BE98),
-            secondaryContainer = Color(0xFF314852), onSecondaryContainer = palette.ink)
+        MaterialTheme(colorScheme = if (dark) darkColorScheme(primary = Color(0xFFFF5A1F), onPrimary = Color(0xFF1B1C1E),
+            surface = Color(0xFF1C1D1F), onSurface = palette.ink, secondary = Color(0xFFD9D8D2),
+            secondaryContainer = Color(0xFF2C2D30), onSecondaryContainer = palette.ink)
         else lightColorScheme(primary = Color(0xFF30596D), onPrimary = Color.White,
             surface = Color(0xFFF4F7F8), onSurface = palette.ink, secondary = Color(0xFF84775F),
             secondaryContainer = Color(0xFFDCE8ED), onSecondaryContainer = palette.ink), content = content)
@@ -595,8 +595,9 @@ fun LauncherScreen(
                     // Composite the stationary dock independently of the shared pager layer.
                     compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
                 }.testTag("dock"),
-                shape = RoundedCornerShape(30.dp), color = Glass.copy(alpha = .32f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .3f))) {
+                shape = RoundedCornerShape(30.dp), color = LocalDuoPalette.current.dockFill ?: Glass.copy(alpha = .32f),
+                border = androidx.compose.foundation.BorderStroke(1.dp,
+                    if (LocalDuoPalette.current.dockFill != null) LocalDuoPalette.current.dockEdge else Color.White.copy(alpha = .3f))) {
                 Column(Modifier.padding(vertical = 8.dp).verticalScroll(dockScroll)) {
                     DockAppColumn(state.dock, previewLayout.dock, appsById, geometry.dockRowHeight,
                         dockIconSize(geometry.iconSize), drag, insertionTarget,
@@ -1209,12 +1210,6 @@ fun LauncherScreen(
                 dismissButton = { TextButton(onClick = widgets::cancelPendingReconfigure,
                     modifier = Modifier.testTag("widget-reconfigure-cancel")) { Text("Cancel") } })
         }
-        // Debug builds only: shows what the launcher believes about the hinge, to check on the Duo.
-        if (launcherActivity.isDebuggableBuild()) {
-            Text(duoHingeReadout(duoHinge, split),
-                Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 2.dp).testTag("duo-hinge-readout"),
-                color = Color.White.copy(alpha = .75f), fontSize = 10.sp)
-        }
         }
     }
 }
@@ -1515,7 +1510,10 @@ private fun SharedHomeGrid(
             Box(Modifier.offset(x = cellWidth * (localIndex % GRID_COLUMNS), y = rowTop(row).dp)
                 .width(cellWidth).height(cellHeight.dp).testTag("home-cell-$globalIndex")
                 .dropRegion(drag, cell, savedApp?.id ?: savedFolder?.id, page)
-                .combinedClickable(onClick = { savedFolder?.let { onFolder(it.id) } },
+                // No press highlight on the cell itself: app icons and folders draw their own, and on an
+                // empty cell the default highlight flashed as a square "ghost" wherever you touched.
+                .combinedClickable(interactionSource = null, indication = null,
+                    onClick = { savedFolder?.let { onFolder(it.id) } },
                     onLongClick = { if (savedId == null && !drag.active) onEmptyWidget(globalIndex) })
                 .background(if (highlighted) Glass.copy(alpha = .25f) else Color.Transparent, RoundedCornerShape(16.dp))
                 .border(if (highlighted) 2.dp else 0.dp,

@@ -51,6 +51,15 @@ fun dualScreenSplit(boxWidth: Float, hingeLeft: Float, hingeRight: Float): DualS
     return DualScreenSplit(screenWidth = minOf(leftScreen, rightScreen), rightScreenStart = hingeRight)
 }
 
+/** Letters on the All apps index strip. */
+internal val IndexLetters = ('A'..'Z').map(Char::toString) + "#"
+
+/** The letter at or after [letter] that has apps, so empty letters jump to the next group, like iOS. */
+internal fun nearestIndexLetter(letter: String, available: Set<String>): String? {
+    val start = IndexLetters.indexOf(letter).coerceAtLeast(0)
+    return IndexLetters.drop(start).firstOrNull { it in available } ?: IndexLetters.lastOrNull { it in available }
+}
+
 /** Advance old defaults without changing individually tuned values. */
 fun upgradePreset(preset: LayoutPreset, schema: Int, expanded: Boolean): LayoutPreset = when {
     schema < 2 -> preset.copy(

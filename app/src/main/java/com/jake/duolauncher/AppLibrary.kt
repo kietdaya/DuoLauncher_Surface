@@ -31,6 +31,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun AppLibrary(
@@ -50,6 +63,7 @@ internal fun AppLibrary(
     val hasWork = state.profiles.any { it.isWork } || state.apps.any { it.isWork }
     var showWork by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val selectedProfile = if (showWork) state.profiles.firstOrNull { it.isWork } else state.profiles.firstOrNull { it.isPersonal }
     LaunchedEffect(showWork, selectedProfile?.available, selectedProfile?.quiet) {
         listState.scrollToItem(0)
@@ -89,8 +103,15 @@ internal fun AppLibrary(
                     focusedLeadingIconColor = ink, unfocusedLeadingIconColor = ink,
                     focusedTrailingIconColor = ink, unfocusedTrailingIconColor = ink,
                 ) else OutlinedTextFieldDefaults.colors())
-            LazyColumn(Modifier.weight(1f).testTag("all-apps-list"), state = listState,
-                contentPadding = PaddingValues(bottom = 12.dp)) {
+            val letterRows = remember(groups, showWork, selectedProfile?.available) {
+                // Index of each letter's heading in the LazyColumn, counting any status row above it.
+                var row = if (showWork && selectedProfile?.available == false) 1 else 0
+                if (groups.isEmpty()) row++
+                buildMap { groups.forEach { (letter, entries) -> put(letter, row); row += 1 + entries.size } }
+            }
+            Row(Modifier.weight(1f)) {
+            LazyColumn(Modifier.weight(1f).fadeTopEdge(14.dp).testTag("all-apps-list"), state = listState,
+                contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp)) {
                 if (showWork && selectedProfile?.available == false) item("work-paused") {
                     Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(if (selectedProfile.quiet) "Work apps are paused" else "Work profile is unavailable")
@@ -100,11 +121,11 @@ internal fun AppLibrary(
                 }
                 if (groups.isEmpty()) item { Text(if (state.loading) "Loading apps…" else "No apps found", Modifier.padding(vertical = 20.dp)) }
                 groups.forEach { (letter, entries) ->
-                    stickyHeader(key = "heading-$letter") {
+                    // Letters scroll away with their apps, so nothing ever slides underneath them.
+                    item(key = "heading-$letter") {
                         Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            // An opaque small chip prevents text from showing through the sticky letter.
                             Box(Modifier.size(width = 32.dp, height = 28.dp).background(
-                                if (glass) (if (palette.dark) Color(0xFF314852) else Color(0xFFB7CBD3))
+                                if (glass) (if (palette.dark) Color(0xFF2C2D30) else Color(0xFFB7CBD3))
                                 else MaterialTheme.colorScheme.surfaceContainer,
                                 RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
                                 Text(letter, color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
@@ -133,6 +154,58 @@ internal fun AppLibrary(
                         }
                     }
                 }
+            }
+            if (letterRows.size > 1) AlphabetIndex(letterRows.keys, ink, Modifier.fillMaxHeight().padding(start = 4.dp, bottom = 12.dp)) { letter ->
+                scope.launch { listState.scrollToItem(letterRows.getValue(letter)) }
+            }
+            }
+        }
+    }
+}
+
+/** Fades content out over [height] at the top edge instead of cutting it off. */
+private fun Modifier.fadeTopEdge(height: Dp) = graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        drawRect(Brush.verticalGradient(0f to Color.Transparent, height.toPx() / size.height.coerceAtLeast(1f) to Color.Black),
+            blendMode = BlendMode.DstIn)
+    }
+
+/**
+ * A–Z strip on the right of All apps. Tap a letter or slide along the strip to jump; each new
+ * letter gives a light haptic tick. Letters with no apps are dimmed and jump to the next group.
+ */
+@Composable
+private fun AlphabetIndex(available: Set<String>, ink: Color, modifier: Modifier, onLetter: (String) -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    var active by remember { mutableStateOf<String?>(null) }
+    BoxWithConstraints(modifier.width(18.dp).testTag("all-apps-index")
+        .semantics { contentDescription = "Alphabet index" }) {
+        val rowHeight = minOf(16.dp, maxHeight / IndexLetters.size)
+        val rowHeightPx = with(LocalDensity.current) { rowHeight.toPx() }
+        val topPx = with(LocalDensity.current) { ((maxHeight - rowHeight * IndexLetters.size) / 2).toPx() }
+        fun pick(y: Float) {
+            val raw = IndexLetters[((y - topPx) / rowHeightPx).toInt().coerceIn(0, IndexLetters.lastIndex)]
+            val letter = nearestIndexLetter(raw, available) ?: return
+            if (letter != active) {
+                active = letter
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onLetter(letter)
+            }
+        }
+        Column(Modifier.fillMaxSize()
+            .pointerInput(available, rowHeightPx, topPx) { detectTapGestures(onPress = { pick(it.y); tryAwaitRelease(); active = null }) }
+            .pointerInput(available, rowHeightPx, topPx) {
+                detectVerticalDragGestures(onDragStart = { pick(it.y) }, onDragEnd = { active = null }, onDragCancel = { active = null }) { change, _ ->
+                    change.consume(); pick(change.position.y)
+                }
+            },
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            IndexLetters.forEach { letter ->
+                val has = letter in available
+                Text(letter, Modifier.height(rowHeight), color = ink.copy(alpha = if (letter == active) 1f else if (has) .85f else .35f),
+                    fontSize = 10.sp, lineHeight = 10.sp,
+                    fontWeight = if (letter == active) FontWeight.Bold else FontWeight.SemiBold)
             }
         }
     }

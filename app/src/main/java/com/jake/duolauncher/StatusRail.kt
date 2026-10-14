@@ -77,6 +77,7 @@ fun StatusRail(
                 maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, style = labelStyle)
             if (!compact) Text(now.format(dateFormatter), color = Color.White.copy(alpha = .94f), fontSize = detailSize,
                 fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, style = labelStyle)
+            val batteryColor = LocalDuoPalette.current.accent
             Canvas(Modifier.size(visualSize)) {
                 val w = size.width
                 val center = Offset(w / 2, w / 2)
@@ -88,7 +89,7 @@ fun StatusRail(
                 drawArc(Color.Black.copy(alpha = .15f), 150f, 240f, false, topLeft, arcSize,
                     style = Stroke(width = ringWidth * 1.25f, cap = StrokeCap.Round))
                 drawArc(Color.White.copy(alpha = .32f), 150f, 240f, false, topLeft, arcSize, style = stroke)
-                status.battery?.let { drawArc(Color.White, 150f, 240f * it / 100, false, topLeft, arcSize, style = stroke) }
+                status.battery?.let { drawArc(batteryColor, 150f, 240f * it / 100, false, topLeft, arcSize, style = stroke) }
                 // Wi-Fi glyph inside the battery arc; no fabricated bars for unknown readings.
                 if (wifiVisual is WifiSignalVisual.Connected) {
                     for (i in 1..3) {

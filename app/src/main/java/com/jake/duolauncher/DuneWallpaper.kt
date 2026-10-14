@@ -73,6 +73,10 @@ internal fun DrawScope.drawLauncherBackground(photo: ImageBitmap?, dark: Boolean
 }
 
 internal fun DrawScope.drawDunes(dark: Boolean = false) {
+    if (dark) {
+        drawGraphite()
+        return
+    }
         val w = size.width; val h = size.height
         drawRect(Brush.verticalGradient(if (dark) listOf(Color(0xFF132832), Color(0xFF263E49), Color(0xFF463F35))
             else listOf(Color(0xFF41687E), Color(0xFF94ADB5), Color(0xFFD8CEB6))))
@@ -201,4 +205,12 @@ class DuneWallpaperService : WallpaperService() {
             } finally { holder.unlockCanvasAndPost(canvas) }
         }
     }
+}
+
+/** KO II dark background: matte graphite, slightly lighter toward the bottom. */
+internal fun DrawScope.drawGraphite() {
+    drawRect(Brush.verticalGradient(listOf(Color(0xFF0F1011), Color(0xFF17181A), Color(0xFF1C1D1F))))
+    drawRect(Brush.radialGradient(listOf(Color(0xFF2A2B2D), Color.Transparent),
+        center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height * 1.15f),
+        radius = maxOf(size.width, size.height) * .7f))
 }
