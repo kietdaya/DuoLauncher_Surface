@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.roundToInt
@@ -166,6 +167,7 @@ fun LauncherScreen(
     var libraryQuery by rememberSaveable { mutableStateOf("") }
     var pinQuery by rememberSaveable { mutableStateOf("") }
     val launcherActivity = androidx.activity.compose.LocalActivity.current as MainActivity
+    val duoHinge = rememberDuoHinge(launcherActivity)
     val launcherRootView = LocalView.current.rootView
     DisposableEffect(sheet == "widgets") {
         val active = sheet == "widgets"
@@ -418,12 +420,20 @@ fun LauncherScreen(
             val wide = maxWidth.value >= 650f
             val preset = if (wide) state.expanded else state.compact
             val density = LocalDensity.current
+            // Surface Duo: when spanned, split this box into its two screens around the hinge.
+            // The hinge comes in window pixels; this box starts after the left safe-drawing inset.
+            val boxLeftPx = WindowInsets.safeDrawing.getLeft(density, LocalLayoutDirection.current)
+            val split = duoHinge?.takeIf { wide }?.let { hinge ->
+                dualScreenSplit(maxWidth.value,
+                    hingeLeft = (hinge.left - boxLeftPx) / density.density,
+                    hingeRight = (hinge.right - boxLeftPx) / density.density)
+            }
             val inLibrary = pager.currentPage == visibleHomePages
             var statusHeight by remember { mutableFloatStateOf(0f) }
             val geometry = homeGeometry(maxWidth.value, maxHeight.value, preset, state.labels,
                 statusHeight = if (state.verticalStatus) statusHeight + 22f else 0f,
                 labelHeight = with(density) { 14.sp.toDp().value } + 6f, inLibrary = inLibrary,
-                homeBottomSpace = if (isDefaultHome) 44f else 88f)
+                homeBottomSpace = if (isDefaultHome) 44f else 88f, screenWidth = split?.screenWidth)
             SideEffect {
                 resizePitchX = with(density) { (geometry.gridWidth / GRID_COLUMNS).dp.toPx() }
                 resizePitchY = with(density) { minOf((geometry.widgetHeight + 18f) / 2f, geometry.rowHeight).dp.toPx() }
@@ -455,13 +465,18 @@ fun LauncherScreen(
                 }
             }
             val contentHeight = maxHeight
-            val panelWidth = maxWidth - geometry.homeWidth.dp
+            // panelWidth is where the right-hand Home page starts. On a Surface Duo that is the
+            // right screen's edge, and pages move by exactly one screen plus the hinge.
+            val panelWidth = if (split != null) split.rightScreenStart.dp else maxWidth - geometry.homeWidth.dp
             val pagerWidth = maxWidth - preset.dockWidth.dp - 28.dp
-            val leftColumnOrigin = (maxWidth / 2f - geometry.gridWidth.dp) / 2f - 16.dp
+            val leftColumnOrigin = if (split != null) 0.dp else (maxWidth / 2f - geometry.gridWidth.dp) / 2f - 16.dp
             val homeStride = panelWidth - leftColumnOrigin
             val bottomSpace = if (isDefaultHome) 44.dp else 88.dp
-            val workspaceMotion = if (geometry.expanded) remember(firstHome, visibleHomePages, pagerWidth, homeStride, density) {
-                WorkspacePageMotion(firstHome, visibleHomePages, with(density) { pagerWidth.toPx() }, with(density) { homeStride.toPx() })
+            val workspaceMotion = if (geometry.expanded) remember(firstHome, visibleHomePages, pagerWidth, homeStride, split, density) {
+                val pagerWidthPx = with(density) { pagerWidth.toPx() }
+                val homeStridePx = with(density) { homeStride.toPx() }
+                WorkspacePageMotion(firstHome, visibleHomePages, pagerWidthPx, homeStridePx,
+                    trailingStride = if (split != null) homeStridePx else pagerWidthPx)
             } else null
             val dockScroll = rememberScrollState()
             var gestureOriginInRoot by remember { mutableStateOf(Offset.Zero) }
@@ -524,6 +539,7 @@ fun LauncherScreen(
                     ExpandedWorkspace(
                         nativePager = nativePager, motion = workspaceMotion!!, firstHome = firstHome,
                         visibleHomePages = visibleHomePages, panelWidth = panelWidth,
+                        dualScreen = split != null,
                         contentHeight = contentHeight, bottomSpace = bottomSpace, geometry = geometry,
                         state = state, previewSlots = previewLayout.slots, previewLeadingSlots = previewLayout.leadingSlots,
                         previewWidgetPlacements = previewLayout.widgetPlacements, appsById = appsById,
@@ -587,7 +603,11 @@ fun LauncherScreen(
                         onLaunch = onLaunchFrom, onChoose = { dockSlot = it; sheet = "dock" })
                 }
             }
-            Column(Modifier.align(Alignment.BottomStart).width(pagerWidth).padding(start = 16.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // On a Surface Duo, keep the page dots on the right screen instead of under the hinge.
+            val pageControls = if (split != null)
+                Modifier.align(Alignment.BottomStart).offset(x = panelWidth).width((geometry.gridWidth + 16f).dp)
+            else Modifier.align(Alignment.BottomStart).width(pagerWidth)
+            Column(pageControls.padding(start = 16.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (!isDefaultHome) FilledTonalButton(onClick = { sheet = ""; onMakeDefault() }, Modifier.heightIn(min = 48.dp).testTag("home-setup")) {
                     Icon(Icons.Rounded.Home, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Set as home app")
                 }
@@ -1189,6 +1209,12 @@ fun LauncherScreen(
                 dismissButton = { TextButton(onClick = widgets::cancelPendingReconfigure,
                     modifier = Modifier.testTag("widget-reconfigure-cancel")) { Text("Cancel") } })
         }
+        // Debug builds only: shows what the launcher believes about the hinge, to check on the Duo.
+        if (launcherActivity.isDebuggableBuild()) {
+            Text(duoHingeReadout(duoHinge, split),
+                Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 2.dp).testTag("duo-hinge-readout"),
+                color = Color.White.copy(alpha = .75f), fontSize = 10.sp)
+        }
         }
     }
 }
@@ -1200,6 +1226,7 @@ private fun ExpandedWorkspace(
     firstHome: Int,
     visibleHomePages: Int,
     panelWidth: Dp,
+    dualScreen: Boolean,
     contentHeight: Dp,
     bottomSpace: Dp,
     geometry: HomeGeometry,
@@ -1317,8 +1344,15 @@ private fun ExpandedWorkspace(
         }
 
         if (showLibrary) {
+            // Upstream, All apps fills the whole window after the last Home pair. On a Surface Duo
+            // it takes the right screen's slot beside the last Home page, one page wide, so it
+            // never crosses the hinge and stays whole when an app covers the left screen.
+            val libraryX = if (dualScreen) initialHomeOrigin + visibleHomePages * stride
+                else (visibleHomePages - 1) * stride + viewportWidth
+            val librarySize = if (dualScreen) Modifier.width((geometry.gridWidth + 16f).dp).fillMaxHeight()
+                else Modifier.fillMaxSize()
             key("library-pane") {
-                Box(Modifier.place((visibleHomePages - 1) * stride + viewportWidth).fillMaxSize()) {
+                Box(Modifier.place(libraryX).then(librarySize)) {
                     AppLibrary(state, libraryQuery, onLibraryQuery, onLaunch, onPinned,
                         onActions = onActions,
                         modifier = Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, bottom = bottomSpace)

@@ -31,6 +31,26 @@ data class HomeGeometry(
     val dockRowHeight: Float,
 )
 
+/**
+ * Two equal screens of a dual-screen window, in dp relative to the Home content box.
+ * The left screen starts at 0; [rightScreenStart] is where the right screen's glass begins.
+ */
+data class DualScreenSplit(val screenWidth: Float, val rightScreenStart: Float) {
+    /** Distance a page moves to go from the left screen to the right screen. */
+    val stride get() = rightScreenStart
+}
+
+/**
+ * Splits a content box of [boxWidth] dp around a hinge spanning [hingeLeft, hingeRight) dp,
+ * both relative to the box. Returns null when the hinge doesn't cut the box into two screens.
+ */
+fun dualScreenSplit(boxWidth: Float, hingeLeft: Float, hingeRight: Float): DualScreenSplit? {
+    if (hingeLeft <= 0f || hingeRight >= boxWidth || hingeRight <= hingeLeft) return null
+    val leftScreen = hingeLeft
+    val rightScreen = boxWidth - hingeRight
+    return DualScreenSplit(screenWidth = minOf(leftScreen, rightScreen), rightScreenStart = hingeRight)
+}
+
 /** Advance old defaults without changing individually tuned values. */
 fun upgradePreset(preset: LayoutPreset, schema: Int, expanded: Boolean): LayoutPreset = when {
     schema < 2 -> preset.copy(
@@ -42,10 +62,18 @@ fun upgradePreset(preset: LayoutPreset, schema: Int, expanded: Boolean): LayoutP
     else -> preset
 }
 
-fun homeGeometry(width: Float, height: Float, preset: LayoutPreset, labels: Boolean, statusHeight: Float = 0f, labelHeight: Float = 20f, inLibrary: Boolean = false, homeBottomSpace: Float = 44f): HomeGeometry {
+/**
+ * [screenWidth] is set only on dual-screen devices (Surface Duo) while spanned. Each Home
+ * page then takes exactly one screen, so the dock gutter is kept on every page.
+ */
+fun homeGeometry(width: Float, height: Float, preset: LayoutPreset, labels: Boolean, statusHeight: Float = 0f, labelHeight: Float = 20f, inLibrary: Boolean = false, homeBottomSpace: Float = 44f, screenWidth: Float? = null): HomeGeometry {
     val p = preset.sanitized()
     val expanded = width >= 650f
-    val homeWidth = if (expanded) minOf(460f, width * 0.56f) else width
+    val homeWidth = when {
+        expanded && screenWidth != null -> screenWidth
+        expanded -> minOf(460f, width * 0.56f)
+        else -> width
+    }
     val gridWidth = (homeWidth - p.dockWidth - 44f).coerceAtLeast(192f)
     val icon = minOf(p.iconSize, (gridWidth / 4f - 10f).coerceAtLeast(32f))
     // Keep the same icon rhythm when labels are hidden; allow larger system text to fit.

@@ -35,7 +35,7 @@ android {
     namespace = "com.jake.duolauncher"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.jake.duolauncher"
+        applicationId = "com.kiet.duolauncher"
         minSdk = 31
         targetSdk = 36
         versionCode = 30
