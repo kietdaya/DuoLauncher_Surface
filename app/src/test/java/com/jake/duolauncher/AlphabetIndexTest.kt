@@ -30,4 +30,20 @@ class AlphabetIndexTest {
         assertEquals("A", IndexLetters.first())
         assertEquals("#", IndexLetters.last())
     }
+
+    @Test fun `strip shows every letter when there is room`() {
+        assertEquals((0 until 27).toList(), indexSlots(27, 40))
+    }
+
+    @Test fun `condensed strip alternates letters and dots and keeps A and number sign`() {
+        val slots = indexSlots(27, 14)
+        assertEquals(13, slots.size)
+        assertEquals(0, slots.first())
+        assertEquals(26, slots.last())
+        slots.forEachIndexed { i, slot -> assertEquals(i % 2 == 1, slot == null) }
+    }
+
+    @Test fun `tiny strip still shows first and last letters`() {
+        assertEquals(listOf(0, null, 26), indexSlots(27, 1))
+    }
 }

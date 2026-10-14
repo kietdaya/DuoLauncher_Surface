@@ -416,13 +416,17 @@ fun LauncherScreen(
         },
         onFinish = { cancelled -> finishDrag(cancelled) })) {
         DuneWallpaper()
-        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        // On a Surface Duo the keyboard covers only one screen, but Android reports it across the whole
+        // window, so the Home layout would shrink on both screens. Leave the keyboard out there; All apps
+        // search sits at the top of its panel, so it stays visible either way.
+        val homeInsets = if (duoHinge != null) WindowInsets.safeDrawing.exclude(WindowInsets.ime) else WindowInsets.safeDrawing
+        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(homeInsets)) {
             val wide = maxWidth.value >= 650f
             val preset = if (wide) state.expanded else state.compact
             val density = LocalDensity.current
             // Surface Duo: when spanned, split this box into its two screens around the hinge.
             // The hinge comes in window pixels; this box starts after the left safe-drawing inset.
-            val boxLeftPx = WindowInsets.safeDrawing.getLeft(density, LocalLayoutDirection.current)
+            val boxLeftPx = homeInsets.getLeft(density, LocalLayoutDirection.current)
             val split = duoHinge?.takeIf { wide }?.let { hinge ->
                 dualScreenSplit(maxWidth.value,
                     hingeLeft = (hinge.left - boxLeftPx) / density.density,

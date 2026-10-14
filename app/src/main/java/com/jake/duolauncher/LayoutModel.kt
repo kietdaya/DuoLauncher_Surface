@@ -60,6 +60,19 @@ internal fun nearestIndexLetter(letter: String, available: Set<String>): String?
     return IndexLetters.drop(start).firstOrNull { it in available } ?: IndexLetters.lastOrNull { it in available }
 }
 
+/**
+ * What the A–Z strip shows when only [room] rows fit: indices into [count] letters, with null for a dot.
+ * With enough room every letter shows; otherwise letters alternate with dots, first and last kept.
+ */
+internal fun indexSlots(count: Int, room: Int): List<Int?> {
+    if (room >= count) return (0 until count).toList()
+    val n = (if (room % 2 == 0) room - 1 else room).coerceAtLeast(3)
+    val letters = n / 2 + 1
+    return (0 until n).map { i ->
+        if (i % 2 == 1) null else Math.round((i / 2) * (count - 1).toFloat() / (letters - 1))
+    }
+}
+
 /** Advance old defaults without changing individually tuned values. */
 fun upgradePreset(preset: LayoutPreset, schema: Int, expanded: Boolean): LayoutPreset = when {
     schema < 2 -> preset.copy(

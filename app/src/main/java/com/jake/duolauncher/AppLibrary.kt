@@ -181,10 +181,14 @@ private fun AlphabetIndex(available: Set<String>, ink: Color, modifier: Modifier
     var active by remember { mutableStateOf<String?>(null) }
     BoxWithConstraints(modifier.width(18.dp).testTag("all-apps-index")
         .semantics { contentDescription = "Alphabet index" }) {
-        val rowHeight = minOf(16.dp, maxHeight / IndexLetters.size)
-        val rowHeightPx = with(LocalDensity.current) { rowHeight.toPx() }
-        val topPx = with(LocalDensity.current) { ((maxHeight - rowHeight * IndexLetters.size) / 2).toPx() }
+        // Each slot needs at least 12dp; with less room, show a condensed strip of letters and dots.
+        val slots = indexSlots(IndexLetters.size, (maxHeight / 12.dp).toInt())
+        val rowHeight = minOf(16.dp, maxHeight / slots.size.coerceAtLeast(1))
+        val stripPx = with(LocalDensity.current) { (rowHeight * slots.size).toPx() }
+        val topPx = with(LocalDensity.current) { ((maxHeight - rowHeight * slots.size) / 2).toPx() }
+        val rowHeightPx = stripPx / IndexLetters.size
         fun pick(y: Float) {
+            // Sliding maps across all 27 letters even when the strip is condensed.
             val raw = IndexLetters[((y - topPx) / rowHeightPx).toInt().coerceIn(0, IndexLetters.lastIndex)]
             val letter = nearestIndexLetter(raw, available) ?: return
             if (letter != active) {
@@ -201,11 +205,12 @@ private fun AlphabetIndex(available: Set<String>, ink: Color, modifier: Modifier
                 }
             },
             verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            IndexLetters.forEach { letter ->
-                val has = letter in available
-                Text(letter, Modifier.height(rowHeight), color = ink.copy(alpha = if (letter == active) 1f else if (has) .85f else .35f),
+            slots.forEach { slot ->
+                val letter = slot?.let(IndexLetters::get)
+                val has = letter != null && letter in available
+                Text(letter ?: "•", Modifier.height(rowHeight), color = ink.copy(alpha = if (letter != null && letter == active) 1f else if (has || letter == null) .85f else .35f),
                     fontSize = 10.sp, lineHeight = 10.sp,
-                    fontWeight = if (letter == active) FontWeight.Bold else FontWeight.SemiBold)
+                    fontWeight = if (letter != null && letter == active) FontWeight.Bold else FontWeight.SemiBold)
             }
         }
     }
