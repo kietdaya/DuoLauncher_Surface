@@ -114,7 +114,7 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, 
     LaunchedEffect(calendarAllowed, window, resumes, minute) { events = loadFeedEvents(context, window.start, window.end) }
 
     // Weather place: the one saved by tapping Sync, else the sunrise/sunset place if there is one.
-    remember { FeedPlaceSync.load(context) }
+    FeedPlaceSync.load(context) // loads the saved place once; later calls do nothing
     val synced by FeedPlaceSync.place.collectAsState()
     val syncing by FeedPlaceSync.syncing.collectAsState()
     val syncProblem by FeedPlaceSync.problem.collectAsState()
