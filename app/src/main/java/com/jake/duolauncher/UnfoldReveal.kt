@@ -33,15 +33,13 @@ import kotlin.math.abs
 import kotlin.math.exp
 
 /**
- * The book-style open and close effect: Home blurs and dims as the Duo closes, and comes back
- * into focus as it opens.
+ * The book-style close effect: Home blurs and dims as the Duo closes.
  *
- * - Opening without a lock screen: Home follows the hinge, sharp by [OPEN] degrees.
- * - Opening with a lock screen: the lock screen hides the opening, so Home plays a short timed
- *   reveal the moment it appears after unlocking.
  * - Closing: once the hinge drops [CLOSE_TRIGGER] degrees below where it rested, the blur follows
- *   it down and is complete by [CLOSED] degrees, before the screens switch off.
- * - Holding still partway (book posture) finishes the reveal, so Home never stays half blurred.
+ *   it down and is complete by [CLOSED] degrees, before the screens switch off. Reopening before
+ *   the screens switch off follows the hinge back up.
+ * - Opening: no effect. Home is reset to sharp when the screens switch off, so it wakes sharp.
+ * - Stopping partway while closing finishes back to sharp, so Home never stays half blurred.
  * - Folding back past flat into one-screen use never triggers anything.
  *
  * State lives here rather than in one activity because MainActivity is recreated on some
@@ -49,7 +47,7 @@ import kotlin.math.exp
  */
 internal object UnfoldReveal {
     private const val TAG = "DuoUnfoldReveal"
-    /** Fully sharp at or beyond this hinge angle while opening. */
+    /** Closing never starts the blur above this hinge angle. */
     private const val OPEN = 150f
     /** Fully blurred at or below this hinge angle while closing. */
     private const val CLOSED = 15f
@@ -58,14 +56,11 @@ internal object UnfoldReveal {
     /** No hinge movement for this long while following means the Duo is being held still. */
     private const val HOLD_MS = 300L
     private const val TIMED_MS = 650L
-    /** Home must appear this soon after unlocking (or waking, without a lock) to count as opened. */
-    private const val UNLOCK_FRESH_MS = 2_000L
-    private const val WAKE_FRESH_MS = 4_000L
     /** Safety net: blurred Home with focus and a still hinge for this long gets revealed anyway. */
     private const val STUCK_MS = 1_000L
     const val MAX_BLUR_DP = 22f
 
-    private enum class Mode { IDLE, FOLLOW, TIMED, HELD }
+    private enum class Mode { IDLE, FOLLOW, TIMED }
 
     /** 0 = fully blurred and dim, 1 = sharp. Read by [unfoldReveal] while drawing. */
     val progress = mutableFloatStateOf(1f)
@@ -76,9 +71,6 @@ internal object UnfoldReveal {
     private var top = OPEN
     private var target = 1f
     private var lastMoveMs = 0L
-    private var screenOnMs = 0L
-    private var unlockMs = 0L
-    private var openedSinceWake = false
     private var timedFrom = 0f
     private var timedStartMs = 0L
     private var lastFrameNs = 0L
@@ -107,11 +99,11 @@ internal object UnfoldReveal {
         val previous = angle
         angle = value
         if (previous.isNaN() || abs(value - previous) >= 1f) lastMoveMs = now
-        if (value < OPEN) openedSinceWake = true
-        if (!resumed || locked() || mode == Mode.HELD) return
+        if (!resumed || locked()) return
         if (mode == Mode.IDLE || mode == Mode.TIMED) {
             if (restAngle.isNaN() || value > restAngle) restAngle = value
-            if (value < OPEN && restAngle - value >= CLOSE_TRIGGER) {
+            val context = controller?.activity ?: return
+            if (value < OPEN && restAngle - value >= CLOSE_TRIGGER && !animationsOff(context)) {
                 top = restAngle.coerceAtMost(OPEN).coerceAtLeast(CLOSED + 30f)
                 mode = Mode.FOLLOW
                 Log.i(TAG, "closing from ${restAngle}°")
@@ -128,52 +120,32 @@ internal object UnfoldReveal {
     }
 
     private fun onScreenOn() {
-        screenOnMs = SystemClock.uptimeMillis()
-        openedSinceWake = false
+        resetSharp()
         controller?.setSensor(true)
     }
 
     private fun onScreenOff() {
         controller?.setSensor(false)
-        // Closed (or nearly): keep Home blurred so it can't flash sharp when the screens wake.
-        val context = controller?.activity ?: return
-        if (!angle.isNaN() && angle < OPEN && !animationsOff(context)) {
-            mode = Mode.HELD
-            progress.floatValue = 0f
-        }
+        // The close is done. Reset now so Home wakes sharp, with no effect on opening.
+        resetSharp()
         restAngle = Float.NaN
+    }
+
+    private fun resetSharp() {
+        mode = Mode.IDLE
+        progress.floatValue = 1f
     }
 
     /**
      * Home may have just become visible and usable: on resume, on unlock and on window focus.
-     * Focus is the dependable one, since Home only gets it once the lock screen is really gone;
-     * resume and the unlock broadcast can each arrive while the lock screen still reports as up.
+     * Focus is the dependable one, since Home only gets it once the lock screen is really gone.
      */
     private fun onShown() {
-        val context = controller?.activity ?: return
         if (!resumed || (!focused && locked())) return
         scheduleWatchdog()
-        val now = SystemClock.uptimeMillis()
-        val fresh = now - unlockMs < UNLOCK_FRESH_MS || now - screenOnMs < WAKE_FRESH_MS
-        val opened = fresh && (openedSinceWake || mode == Mode.HELD)
-        openedSinceWake = false
         restAngle = angle
-        if (!opened || animationsOff(context)) {
-            if (mode == Mode.HELD || mode == Mode.TIMED) { mode = Mode.IDLE; progress.floatValue = 1f }
-            return
-        }
-        if (!angle.isNaN() && angle < OPEN && now - lastMoveMs < HOLD_MS) {
-            // No lock screen in the way and still opening: follow the hinge the rest of the way.
-            top = OPEN
-            target = ((angle - CLOSED) / (top - CLOSED)).coerceIn(0f, 1f)
-            progress.floatValue = 0f
-            mode = Mode.FOLLOW
-            Log.i(TAG, "opening, following from ${angle}°")
-        } else {
-            startTimed(0f)
-            Log.i(TAG, "opened behind the lock screen; timed reveal (hinge ${angle}°)")
-        }
-        requestFrame()
+        // Opening has no effect: whenever Home appears outside a close in progress, it's sharp.
+        if (mode != Mode.FOLLOW) resetSharp()
     }
 
     private val watchdog = Runnable {
@@ -214,7 +186,6 @@ internal object UnfoldReveal {
         lastFrameNs = frameNs
         var keepGoing = true
         when (mode) {
-            Mode.HELD -> keepGoing = false
             Mode.TIMED -> {
                 val t = ((now - timedStartMs).toFloat() / TIMED_MS).coerceIn(0f, 1f)
                 val eased = 1f - (1f - t) * (1f - t) * (1f - t)
@@ -257,7 +228,7 @@ internal object UnfoldReveal {
                 when (intent.action) {
                     Intent.ACTION_SCREEN_ON -> onScreenOn()
                     Intent.ACTION_SCREEN_OFF -> onScreenOff()
-                    Intent.ACTION_USER_PRESENT -> { unlockMs = SystemClock.uptimeMillis(); onShown() }
+                    Intent.ACTION_USER_PRESENT -> onShown()
                 }
             }
         }
