@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1360,7 +1361,7 @@ private fun ExpandedWorkspace(
                     .pointerInput(Unit) {
                         // Swipe up on the left screen brings up the app bar, like Microsoft Launcher.
                         var total = 0f
-                        androidx.compose.foundation.gestures.detectVerticalDragGestures(
+                        detectVerticalDragGestures(
                             onDragStart = { total = 0f },
                             onDragEnd = { if (total < -56.dp.toPx()) onLeftSwipeUp() },
                         ) { _, dy -> total += dy }
