@@ -2,5 +2,5 @@
     <string name="dune_wallpaper_description">Duo dunes — the launcher’s landscape, sized for your display.</string>
     <string name="now_playing_listener_label">Duo Dev now playing</string>
     <string name="shade_service_label">Duo Dev screens</string>
-    <string name="shade_service_description">Lets Duo Dev see which Surface Duo screen an app is using, so Home moves to the free screen, and lets Home open the notification panel. It looks only at where app windows are on the screens, never at what is inside them.</string>
+    <string name="shade_service_description">Lets Duo Dev see which Surface Duo screen an app is using, so Home moves to the free screen, and pulls down the notification panel on the screen you swipe. It looks only at where app windows are on the screens, never at what is inside them.</string>
 </resources>

@@ -152,9 +152,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var lastDownX = -1f
+    private var pullingUntil = 0L
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) lastDownX = ev.rawX
+        return super.dispatchTouchEvent(ev)
+    }
+
     internal fun openSystemShade(panel: ShadePanel) {
-        // Same as the original Duo Launcher: the shade opens only through the accessibility service's
-        // global action. This is the approach that works on the Surface Duo with the status bar hidden.
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now < pullingUntil) return // our own simulated pull landing on Home
+        if (isSurfaceDuo && lastDownX >= 0f && SystemShadeAccessibilityService.isConnected()) {
+            // The Duo opens the shade on whichever screen it picks for the accessibility action. Instead, show
+            // the status bar and pull it down where you swiped, so the shade opens on that screen. The bar
+            // hides again when Home gets focus back.
+            pullingUntil = now + 1200
+            val x = lastDownX
+            WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
+            window.decorView.postDelayed({
+                if (!SystemShadeAccessibilityService.pullShade(x)) openShadeByAction(panel)
+            }, 220)
+            window.decorView.postDelayed({ if (hasWindowFocus()) setStatusMode(model.state.value.verticalStatus) }, 1600)
+            return
+        }
+        openShadeByAction(panel)
+    }
+
+    private fun openShadeByAction(panel: ShadePanel) {
+        // Same as the original Duo Launcher: the accessibility service's global action.
         when (SystemShadeAccessibilityService.open(this, panel)) {
             ShadeOpenResult.OPENED -> Unit
             ShadeOpenResult.SERVICE_DISABLED -> showShadeSetup()

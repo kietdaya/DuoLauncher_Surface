@@ -432,7 +432,10 @@ fun LauncherScreen(
         // On a Surface Duo the keyboard covers only one screen, but Android reports it across the whole
         // window, so the Home layout would shrink on both screens. Leave the keyboard out there; All apps
         // search sits at the top of its panel, so it stays visible either way.
-        val homeInsets = if (duoHinge != null) WindowInsets.safeDrawing.exclude(WindowInsets.ime) else WindowInsets.safeDrawing
+        // On a Duo, leave out the keyboard (it covers one screen only) and, with the status rail on, Android's
+        // status bar: it appears when another app such as Chrome asks for it, and Home shouldn't jump for it.
+        val homeInsets = if (duoHinge != null) WindowInsets.safeDrawing.exclude(WindowInsets.ime)
+            .let { if (state.verticalStatus) it.exclude(WindowInsets.statusBars) else it } else WindowInsets.safeDrawing
         val homeArea = if (homeOnLeft) Modifier.fillMaxHeight().width(with(LocalDensity.current) { duoHinge!!.left.toDp() })
             else Modifier.fillMaxSize()
         BoxWithConstraints(homeArea.windowInsetsPadding(homeInsets)) {

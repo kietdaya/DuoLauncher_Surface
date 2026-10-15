@@ -25,6 +25,18 @@ class SystemShadeAccessibilityService : AccessibilityService() {
         if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED || type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) updateScreenCoverage()
     }
     override fun onInterrupt() = Unit
+
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingUncover: Runnable? = null
+
+    /** A status-bar pull at [x] (screen pixels), as if your finger did it, so the Duo opens the shade there. */
+    internal fun pullShade(x: Float): Boolean = try {
+        val path = android.graphics.Path().apply { moveTo(x, 4f); lineTo(x, 900f) }
+        val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 260)
+        dispatchGesture(android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build(), null, null)
+    } catch (_: Throwable) {
+        false
+    }
     override fun onDestroy() {
         if (instance.get() === this) instance.clear()
         DuoScreenCoverage.set(left = false, right = false)
@@ -41,7 +53,12 @@ class SystemShadeAccessibilityService : AccessibilityService() {
             var left = false
             var right = false
             val bounds = android.graphics.Rect()
-            for (window in windows) {
+            val all = windows
+            // While the shade or another large system panel is open, Android leaves apps out of this list.
+            // Keep the last answer instead of briefly deciding a screen is free.
+            if (all.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM &&
+                    run { it.getBoundsInScreen(bounds); bounds.height() > hinge.left / 2 } }) return
+            for (window in all) {
                 if (window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue
                 val root = window.root
                 val owner = root?.packageName?.toString()
@@ -53,14 +70,26 @@ class SystemShadeAccessibilityService : AccessibilityService() {
                 if (coversLeft) left = true
                 if (coversRight) right = true
             }
-            DuoScreenCoverage.set(left, right)
+            applyCoverage(left, right)
         } catch (_: Throwable) {
         }
+    }
+
+    /** Covering applies at once; freeing a screen waits half a second so brief window changes don't flip Home. */
+    private fun applyCoverage(left: Boolean, right: Boolean) {
+        pendingUncover?.let(main::removeCallbacks); pendingUncover = null
+        val freesLeft = DuoScreenCoverage.left.value && !left
+        val freesRight = DuoScreenCoverage.right.value && !right
+        if (!freesLeft && !freesRight) return DuoScreenCoverage.set(left, right)
+        // Apply any new covering now, keep a screen that might be freeing until it stays free.
+        DuoScreenCoverage.set(left || DuoScreenCoverage.left.value, right || DuoScreenCoverage.right.value)
+        pendingUncover = Runnable { pendingUncover = null; DuoScreenCoverage.set(left, right) }.also { main.postDelayed(it, 500) }
     }
 
     companion object {
         private var instance = WeakReference<SystemShadeAccessibilityService>(null)
         internal fun isConnected() = instance.get() != null
+        internal fun pullShade(x: Float): Boolean = instance.get()?.pullShade(x) ?: false
 
         internal fun open(context: Context, panel: ShadePanel): ShadeOpenResult {
             val service = instance.get()
