@@ -28,6 +28,7 @@ import android.service.notification.StatusBarNotification
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -140,23 +141,38 @@ object FeedPlaceStore {
 fun hasLocationAccess(context: Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+/** What a location sync produced: the place, or a short reason it couldn't. */
+data class PlaceSyncResult(val place: FeedPlace?, val problem: String?)
+
 /**
  * Reads the Duo's approximate location once, names the town, and saves it for weather.
- * Returns null when Location is off or nothing answers in time.
+ * Uses a fix the Duo already has from the last 30 minutes when there is one (instant), otherwise asks
+ * each available provider in turn, and as a last resort takes the newest fix of any age.
  */
 @SuppressLint("MissingPermission")
-suspend fun syncFeedPlace(context: Context): FeedPlace? {
-    if (!hasLocationAccess(context)) return null
+suspend fun syncFeedPlace(context: Context): PlaceSyncResult {
+    if (!hasLocationAccess(context)) return PlaceSyncResult(null, "Location permission is off for Duo Dev.")
     val manager = context.getSystemService(LocationManager::class.java)
-    val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.FUSED_PROVIDER, LocationManager.GPS_PROVIDER)
-        .firstOrNull { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) } ?: return null
-    val location = withTimeoutOrNull(20_000L) {
-        suspendCancellableCoroutine<Location?> { cont ->
-            val signal = CancellationSignal()
-            cont.invokeOnCancellation { signal.cancel() }
-            manager.getCurrentLocation(provider, signal, context.mainExecutor) { if (cont.isActive) cont.resume(it) }
+    if (!runCatching { manager.isLocationEnabled }.getOrDefault(true))
+        return PlaceSyncResult(null, "Turn on Location for a moment, then tap Sync.")
+    val enabled = runCatching { manager.getProviders(true) }.getOrDefault(emptyList())
+    val newest = enabled.mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+    val recent = newest?.takeIf { System.currentTimeMillis() - it.time <= 30 * 60_000L }
+    val location = recent ?: run {
+        var found: Location? = null
+        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.FUSED_PROVIDER, LocationManager.GPS_PROVIDER)) {
+            if (provider !in enabled) continue
+            found = withTimeoutOrNull(12_000L) {
+                suspendCancellableCoroutine<Location?> { cont ->
+                    val signal = CancellationSignal()
+                    cont.invokeOnCancellation { signal.cancel() }
+                    manager.getCurrentLocation(provider, signal, context.mainExecutor) { if (cont.isActive) cont.resume(it) }
+                }
+            }
+            if (found != null) break
         }
-    } ?: runCatching { manager.getLastKnownLocation(provider) }.getOrNull() ?: return null
+        found ?: newest
+    } ?: return PlaceSyncResult(null, "Couldn't get a location fix. Try again on Wi-Fi or near a window.")
     val name = withContext(Dispatchers.IO) {
         runCatching {
             @Suppress("DEPRECATION")
@@ -164,7 +180,35 @@ suspend fun syncFeedPlace(context: Context): FeedPlace? {
                 ?.firstOrNull()?.let { it.locality ?: it.subAdminArea ?: it.adminArea }
         }.getOrNull()
     } ?: ""
-    return FeedPlace(location.latitude, location.longitude, name).also { FeedPlaceStore.save(context, it) }
+    return PlaceSyncResult(FeedPlace(location.latitude, location.longitude, name).also { FeedPlaceStore.save(context, it) }, null)
+}
+
+/**
+ * Runs location syncs outside any screen, so the sync and the permission answer survive Home
+ * switching layouts or the feed page being rebuilt while it waits for a fix.
+ */
+object FeedPlaceSync {
+    private val scope = kotlinx.coroutines.MainScope()
+    val syncing = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val problem = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val place = kotlinx.coroutines.flow.MutableStateFlow<FeedPlace?>(null)
+    private var loaded = false
+
+    fun load(context: Context) {
+        if (!loaded) { loaded = true; place.value = FeedPlaceStore.load(context) }
+    }
+
+    fun start(context: Context) {
+        if (syncing.value) return
+        val app = context.applicationContext
+        syncing.value = true; problem.value = null
+        scope.launch {
+            val result = try { syncFeedPlace(app) } catch (_: Throwable) { PlaceSyncResult(null, "Couldn't get a location fix.") }
+            result.place?.let { place.value = it }
+            problem.value = result.problem
+            syncing.value = false
+        }
+    }
 }
 
 // ---------- Now playing ----------

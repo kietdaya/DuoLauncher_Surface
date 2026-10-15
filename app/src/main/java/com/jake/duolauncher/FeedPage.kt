@@ -114,23 +114,13 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, 
     LaunchedEffect(calendarAllowed, window, resumes, minute) { events = loadFeedEvents(context, window.start, window.end) }
 
     // Weather place: the one saved by tapping Sync, else the sunrise/sunset place if there is one.
-    var synced by remember { mutableStateOf(FeedPlaceStore.load(context)) }
+    remember { FeedPlaceSync.load(context) }
+    val synced by FeedPlaceSync.place.collectAsState()
+    val syncing by FeedPlaceSync.syncing.collectAsState()
+    val syncProblem by FeedPlaceSync.problem.collectAsState()
     val place = synced ?: if (latitude != null && longitude != null) FeedPlace(latitude, longitude, placeName) else null
-    var syncing by remember { mutableStateOf(false) }
-    var syncFailed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val runSync: () -> Unit = {
-        if (!syncing) scope.launch {
-            syncing = true; syncFailed = false
-            val result = syncFeedPlace(context)
-            if (result != null) synced = result else syncFailed = true
-            syncing = false
-        }
-    }
-    val requestLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) runSync() else syncFailed = true
-    }
-    val onSync = { if (hasLocationAccess(context)) runSync() else requestLocation.launch(Manifest.permission.ACCESS_COARSE_LOCATION) }
+    val launcherActivity = androidx.activity.compose.LocalActivity.current as? MainActivity
+    val onSync: () -> Unit = { launcherActivity?.syncFeedLocation() }
 
     var weather by remember { mutableStateOf(FeedWeatherCache.value) }
     var weatherLoaded by remember { mutableStateOf(false) }
@@ -152,7 +142,7 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, 
 
     Column(modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp).testTag("feed-page"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        WeatherPanel(weather, place, loaded = weatherLoaded, syncing = syncing, syncFailed = syncFailed, use24h = use24h,
+        WeatherPanel(weather, place, loaded = weatherLoaded, syncing = syncing, syncProblem = syncProblem, use24h = use24h,
             style = style, onSync = onSync)
         CalendarPanel(events, window, now, calendarAllowed, use24h, style, Modifier.weight(1f),
             onAllow = { requestCalendar.launch(Manifest.permission.READ_CALENDAR) },
@@ -208,7 +198,7 @@ private fun hourLabel(hourOfDay: Int, use24h: Boolean) =
 // ---------- Weather ----------
 
 @Composable
-private fun WeatherPanel(weather: FeedWeather?, place: FeedPlace?, loaded: Boolean, syncing: Boolean, syncFailed: Boolean,
+private fun WeatherPanel(weather: FeedWeather?, place: FeedPlace?, loaded: Boolean, syncing: Boolean, syncProblem: String?,
     use24h: Boolean, style: FeedStyle, onSync: () -> Unit) {
     FeedPanel(style, Modifier.testTag("feed-weather")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -219,8 +209,7 @@ private fun WeatherPanel(weather: FeedWeather?, place: FeedPlace?, loaded: Boole
                 .padding(horizontal = 8.dp, vertical = 4.dp).testTag("feed-weather-sync"),
                 color = if (syncing) style.muted else style.ink, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.6.sp)
         }
-        if (syncFailed) Text("Couldn't get your location. Turn on Location for a moment, then tap Sync.", color = style.muted,
-            fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        if (!syncing) syncProblem?.let { Text(it, color = style.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
         if (place == null) {
             Text("Tap Sync to show weather for where you are. Your location is read once, only when you tap.",
                 color = style.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp))

@@ -14,6 +14,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -546,7 +547,8 @@ fun LauncherScreen(
                 // Duo with the status rail: Android's bar stays hidden and Home never opens the shade itself
                 // (that crashes the Duo's system UI). Swipe from the top edge to reach notifications.
                 onDownwardSwipe = launcherActivity::openSystemShade,
-                onLeadingOverscroll = null, // Discover is not used
+                // One-screen Home: swiping right past the first page opens the feed (it has no page of its own).
+                onLeadingOverscroll = if (split == null) ({ feedOverlay = true }) else null,
             )) {
             // Home on the Duo's left screen (an app has the right one): mirror the layout so the dock and
             // status sit on the outer left edge instead of against the hinge.
@@ -1256,9 +1258,16 @@ fun LauncherScreen(
                 dismissButton = { TextButton(onClick = widgets::cancelPendingReconfigure,
                     modifier = Modifier.testTag("widget-reconfigure-cancel")) { Text("Cancel") } })
         }
-        if (feedOverlay) {
-            BackHandler { feedOverlay = false }
-            Box(Modifier.fillMaxSize().testTag("feed-overlay")) {
+        if (feedOverlay) BackHandler { feedOverlay = false }
+        androidx.compose.animation.AnimatedVisibility(feedOverlay, Modifier.fillMaxSize(),
+            enter = androidx.compose.animation.slideInHorizontally { -it },
+            exit = androidx.compose.animation.slideOutHorizontally { -it }) {
+            Box(Modifier.fillMaxSize().testTag("feed-overlay").pointerInput(Unit) {
+                // Swipe left to go back to Home, like turning the page back.
+                var total = 0f
+                detectHorizontalDragGestures(onDragStart = { total = 0f },
+                    onDragEnd = { if (total < -64.dp.toPx()) feedOverlay = false }) { _, dx -> total += dx }
+            }) {
                 DuneWallpaper()
                 FeedPage(appearance.latitude, appearance.longitude, appearance.place)
                 IconButton(onClick = { feedOverlay = false }, Modifier.align(Alignment.BottomEnd).padding(16.dp)) {

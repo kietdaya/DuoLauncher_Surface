@@ -51,6 +51,18 @@ class MainActivity : ComponentActivity() {
     private val timeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) { appearance.refresh(systemDark()) }
     }
+    private val feedLocationPermission = activityResultRegistry.register("duo.feed.location", this,
+        ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) FeedPlaceSync.start(this)
+        else FeedPlaceSync.problem.value = "Location permission was declined. Allow it in Settings → Apps → Duo Dev → Permissions."
+    }
+
+    /** The feed's Sync button: read the location once, asking for permission first if needed. */
+    internal fun syncFeedLocation() {
+        if (hasLocationAccess(this)) FeedPlaceSync.start(this)
+        else runCatching { feedLocationPermission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION) }
+    }
+
     private val locationPermission = activityResultRegistry.register("duo.appearance.location", this,
         ActivityResultContracts.RequestPermission(), permissionResult@{ granted ->
         if (appearancePermissionGeneration != appearanceLocationGeneration || isDestroyed) return@permissionResult
