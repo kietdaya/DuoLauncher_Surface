@@ -405,8 +405,7 @@ class MainActivity : ComponentActivity() {
         LiveDiscover.host.get()?.statusMode(vertical)
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        // On a Surface Duo Android's status bar always shows: hiding it fights the Duo's system UI.
-        if (vertical && !isSurfaceDuo) controller.hide(WindowInsetsCompat.Type.statusBars()) else controller.show(WindowInsetsCompat.Type.statusBars())
+        if (vertical) controller.hide(WindowInsetsCompat.Type.statusBars()) else controller.show(WindowInsetsCompat.Type.statusBars())
     }
 
     private fun previewWallpaper() {

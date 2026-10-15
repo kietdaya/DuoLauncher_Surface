@@ -543,10 +543,18 @@ fun LauncherScreen(
                 },
                 // Duo with the status rail: Android's bar stays hidden and Home never opens the shade itself
                 // (that crashes the Duo's system UI). Swipe from the top edge to reach notifications.
-                onDownwardSwipe = launcherActivity::openSystemShade,
+                // Duo with the status rail: Android's bar is hidden, and Home asking for the shade then crashes
+                // the Duo's system UI. Notifications come from Android's own top-edge swipe instead.
+                onDownwardSwipe = if (launcherActivity.isSurfaceDuo && state.verticalStatus) null else launcherActivity::openSystemShade,
                 onLeadingOverscroll = if (firstHome == 0) onDiscover else null,
             )) {
-            val pagerModifier = Modifier.fillMaxHeight().width(pagerWidth)
+            // Home on the Duo's left screen (an app has the right one): mirror the layout so the dock and
+            // status sit on the outer left edge instead of against the hinge.
+            val dockOnLeft = homeOnLeft
+            val sideAlign = if (dockOnLeft) Alignment.TopStart else Alignment.TopEnd
+            val sidePad = if (dockOnLeft) Modifier.padding(start = 12.dp) else Modifier.padding(end = 12.dp)
+            val pagerShift = if (dockOnLeft) preset.dockWidth.dp + 28.dp else 0.dp
+            val pagerModifier = Modifier.offset(x = pagerShift).fillMaxHeight().width(pagerWidth)
                 .drawWithContent {
                     homeLayer.record { this@drawWithContent.drawContent() }
                     drawLayer(homeLayer)
@@ -618,16 +626,15 @@ fun LauncherScreen(
                     }
                 }
             }
-            // On a Duo, Android's status bar shows instead, so the rail would only repeat it.
-            if (state.verticalStatus && !launcherActivity.isSurfaceDuo) StatusRail(deviceStatus,
-                Modifier.align(Alignment.TopEnd).padding(end = 12.dp).offset(y = geometry.contentTop.dp)
+            if (state.verticalStatus) StatusRail(deviceStatus,
+                Modifier.align(sideAlign).then(sidePad).offset(y = geometry.contentTop.dp)
                     .width(preset.dockWidth.dp).onSizeChanged {
                         // The normal rail's 20dp location slot and 3dp gap do not move the dock.
                         statusHeight = (with(density) { it.height.toDp().value } -
                             if (contentHeight < 500.dp) 0f else 23f).coerceAtLeast(0f)
                     },
                 compact = contentHeight < 500.dp, iconSize = dockIconSize(geometry.iconSize).dp)
-            Surface(Modifier.align(Alignment.TopEnd).padding(end = 12.dp).offset(y = geometry.dockTop.dp)
+            Surface(Modifier.align(sideAlign).then(sidePad).offset(y = geometry.dockTop.dp)
                 .width(preset.dockWidth.dp).height(geometry.dockHeight.dp).graphicsLayer {
                     // Composite the stationary dock independently of the shared pager layer.
                     compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
@@ -644,7 +651,7 @@ fun LauncherScreen(
             // On a Surface Duo, keep the page dots on the right screen instead of under the hinge.
             val pageControls = if (split != null)
                 Modifier.align(Alignment.BottomStart).offset(x = panelWidth).width((geometry.gridWidth + 16f).dp)
-            else Modifier.align(Alignment.BottomStart).width(pagerWidth)
+            else Modifier.align(Alignment.BottomStart).offset(x = pagerShift).width(pagerWidth)
             Column(pageControls.padding(start = 16.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (!isDefaultHome) FilledTonalButton(onClick = { sheet = ""; onMakeDefault() }, Modifier.heightIn(min = 48.dp).testTag("home-setup")) {
                     Icon(Icons.Rounded.Home, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Set as home app")
@@ -665,7 +672,8 @@ fun LauncherScreen(
                     }
                 }
             }
-            if (!inLibrary && !drag.active) Column(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 6.dp)
+            if (!inLibrary && !drag.active) Column(Modifier.align(if (dockOnLeft) Alignment.BottomStart else Alignment.BottomEnd)
+                .padding(start = if (dockOnLeft) 12.dp else 0.dp, end = if (dockOnLeft) 0.dp else 12.dp, bottom = 6.dp)
                 .width(preset.dockWidth.dp), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val controlSize = dockIconSize(geometry.iconSize).dp
