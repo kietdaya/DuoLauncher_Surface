@@ -534,18 +534,13 @@ fun LauncherScreen(
                         val rootOnScreen = IntArray(2).also(launcherRootView::getLocationOnScreen)
                         val screenPoint = point + gestureOriginInWindow +
                             Offset(rootOnScreen[0].toFloat(), rootOnScreen[1].toFloat())
-                        // The top strip belongs to Android: with the status bar hidden, a swipe there already
-                        // reveals it, and asking for the shade at the same time crashes the Duo's system UI.
-                        screenPoint.y >= with(density) { 48.dp.toPx() } &&
                         !(region?.target is DropTarget.Dock && dockScroll.value > 0) &&
                             !nativeWidgetConsumesVerticalGesture(launcherRootView, screenPoint)
                     }
                 },
                 // Duo with the status rail: Android's bar stays hidden and Home never opens the shade itself
                 // (that crashes the Duo's system UI). Swipe from the top edge to reach notifications.
-                // Duo with the status rail: Android's bar is hidden, and Home asking for the shade then crashes
-                // the Duo's system UI. Notifications come from Android's own top-edge swipe instead.
-                onDownwardSwipe = if (launcherActivity.isSurfaceDuo && state.verticalStatus) null else launcherActivity::openSystemShade,
+                onDownwardSwipe = launcherActivity::openSystemShade,
                 onLeadingOverscroll = if (firstHome == 0) onDiscover else null,
             )) {
             // Home on the Duo's left screen (an app has the right one): mirror the layout so the dock and

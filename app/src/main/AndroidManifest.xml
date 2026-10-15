@@ -6,8 +6,6 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Feed page: read the calendar Outlook syncs to the Duo, and fetch weather from Open-Meteo. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
-    <!-- Lets swipe-down open the notification shade without the accessibility service. -->
-    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <uses-permission android:name="android.permission.INTERNET" />
     <queries>
         <package android:name="com.google.android.googlequicksearchbox" />

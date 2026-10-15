@@ -152,12 +152,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    internal fun openSystemShade(requested: ShadePanel) {
-        // The Surface Duo's system UI crashes and restarts when an app opens Quick Settings directly,
-        // whichever way it is asked. Open notifications instead; Quick Settings is one more pull down.
-        val panel = if (isSurfaceDuo) ShadePanel.NOTIFICATIONS else requested
-        // Android 12L lets a launcher open the shade itself; accessibility is only the fallback.
-        if (expandShadeDirectly(panel)) return
+    internal fun openSystemShade(panel: ShadePanel) {
+        // Same as the original Duo Launcher: the shade opens only through the accessibility service's
+        // global action. This is the approach that works on the Surface Duo with the status bar hidden.
         when (SystemShadeAccessibilityService.open(this, panel)) {
             ShadeOpenResult.OPENED -> Unit
             ShadeOpenResult.SERVICE_DISABLED -> showShadeSetup()
@@ -170,19 +167,6 @@ class MainActivity : ComponentActivity() {
 
     internal val isSurfaceDuo = android.os.Build.MANUFACTURER.equals("Microsoft", ignoreCase = true) &&
         android.os.Build.MODEL.startsWith("Surface Duo", ignoreCase = true)
-
-    /**
-     * Opens the shade through StatusBarManager, as most launchers do. It needs only the normal
-     * EXPAND_STATUS_BAR permission, so no accessibility service. Returns false if Android refuses.
-     */
-    @android.annotation.SuppressLint("WrongConstant", "PrivateApi", "DiscouragedPrivateApi", "SoonBlockedPrivateApi", "BlockedPrivateApi")
-    private fun expandShadeDirectly(panel: ShadePanel): Boolean = try {
-        val statusBar = getSystemService("statusbar")
-        val name = if (panel == ShadePanel.NOTIFICATIONS) "expandNotificationsPanel" else "expandSettingsPanel"
-        if (statusBar == null) false else { statusBar.javaClass.getMethod(name).invoke(statusBar); true }
-    } catch (_: Throwable) {
-        false
-    }
 
     private fun showShadeSetup() {
         if (shadeSetupDialog?.isShowing == true) return
