@@ -13,11 +13,14 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.Choreographer
+import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Modifier
@@ -58,6 +61,8 @@ internal object UnfoldReveal {
     /** Home must appear this soon after unlocking (or waking, without a lock) to count as opened. */
     private const val UNLOCK_FRESH_MS = 2_000L
     private const val WAKE_FRESH_MS = 4_000L
+    /** Safety net: blurred Home with focus and a still hinge for this long gets revealed anyway. */
+    private const val STUCK_MS = 1_000L
     const val MAX_BLUR_DP = 22f
 
     private enum class Mode { IDLE, FOLLOW, TIMED, HELD }
@@ -89,6 +94,8 @@ internal object UnfoldReveal {
     }
 
     private val resumed get() = controller?.resumed == true
+    private val focused get() = controller?.focused == true
+    private val handler = Handler(Looper.getMainLooper())
 
     private fun locked() = controller?.keyguard?.isKeyguardLocked == true
 
@@ -137,10 +144,15 @@ internal object UnfoldReveal {
         restAngle = Float.NaN
     }
 
-    /** Home just became visible and usable: on resume, or on unlock while already resumed. */
+    /**
+     * Home may have just become visible and usable: on resume, on unlock and on window focus.
+     * Focus is the dependable one, since Home only gets it once the lock screen is really gone;
+     * resume and the unlock broadcast can each arrive while the lock screen still reports as up.
+     */
     private fun onShown() {
         val context = controller?.activity ?: return
-        if (!resumed || locked()) return
+        if (!resumed || (!focused && locked())) return
+        scheduleWatchdog()
         val now = SystemClock.uptimeMillis()
         val fresh = now - unlockMs < UNLOCK_FRESH_MS || now - screenOnMs < WAKE_FRESH_MS
         val opened = fresh && (openedSinceWake || mode == Mode.HELD)
@@ -162,6 +174,23 @@ internal object UnfoldReveal {
             Log.i(TAG, "opened behind the lock screen; timed reveal (hinge ${angle}°)")
         }
         requestFrame()
+    }
+
+    private val watchdog = Runnable {
+        if (!resumed || !focused || progress.floatValue >= 1f) return@Runnable
+        val now = SystemClock.uptimeMillis()
+        if (mode != Mode.TIMED && now - lastMoveMs > STUCK_MS) {
+            Log.i(TAG, "safety net: Home still blurred in $mode; revealing")
+            restAngle = angle
+            startTimed(progress.floatValue)
+            requestFrame()
+        }
+        scheduleWatchdog()
+    }
+
+    private fun scheduleWatchdog() {
+        handler.removeCallbacks(watchdog)
+        handler.postDelayed(watchdog, STUCK_MS)
     }
 
     private fun startTimed(from: Float) {
@@ -213,13 +242,15 @@ internal object UnfoldReveal {
         if (keepGoing) requestFrame() else lastFrameNs = 0L
     }
 
-    private class Controller(val activity: ComponentActivity) : DefaultLifecycleObserver, SensorEventListener {
+    private class Controller(val activity: ComponentActivity) : DefaultLifecycleObserver, SensorEventListener,
+        ViewTreeObserver.OnWindowFocusChangeListener {
         val keyguard: KeyguardManager? = activity.getSystemService(KeyguardManager::class.java)
         private val sensors = activity.getSystemService(SensorManager::class.java)
         private val hinge = sensors?.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE)
         private var sensorOn = false
         private var receiverOn = false
         var resumed = false
+        var focused = false
 
         private val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
@@ -233,6 +264,8 @@ internal object UnfoldReveal {
 
         override fun onCreate(owner: LifecycleOwner) {
             if (hinge == null) return
+            activity.window.decorView.viewTreeObserver.addOnWindowFocusChangeListener(this)
+            focused = activity.hasWindowFocus()
             ContextCompat.registerReceiver(activity, receiver, IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_USER_PRESENT)
@@ -250,11 +283,19 @@ internal object UnfoldReveal {
             resumed = false
         }
 
+        override fun onWindowFocusChanged(hasFocus: Boolean) {
+            focused = hasFocus
+            if (hasFocus && controller === this) onShown()
+        }
+
         override fun onDestroy(owner: LifecycleOwner) = detach()
 
         fun detach() {
             resumed = false
+            focused = false
             setSensor(false)
+            activity.window.decorView.viewTreeObserver.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(this)
+            handler.removeCallbacks(watchdog)
             if (receiverOn) { activity.unregisterReceiver(receiver); receiverOn = false }
             activity.lifecycle.removeObserver(this)
             if (controller === this) controller = null
