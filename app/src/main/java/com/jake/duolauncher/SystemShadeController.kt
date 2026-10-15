@@ -52,6 +52,8 @@ class SystemShadeAccessibilityService : AccessibilityService() {
             val hinge = CurrentDuoHinge.value ?: return DuoScreenCoverage.set(left = false, right = false)
             var left = false
             var right = false
+            val leftApps = mutableSetOf<String>()
+            val rightApps = mutableSetOf<String>()
             val bounds = android.graphics.Rect()
             val all = windows
             // While the shade or another large system panel is open, Android leaves apps out of this list.
@@ -67,9 +69,11 @@ class SystemShadeAccessibilityService : AccessibilityService() {
                 if (bounds.width() <= 0 || bounds.height() <= 0) continue
                 val coversLeft = bounds.left < hinge.left && bounds.right > hinge.left / 2
                 val coversRight = bounds.right > hinge.right && bounds.left < hinge.right + (bounds.right - hinge.right) / 2
-                if (coversLeft) left = true
-                if (coversRight) right = true
+                if (coversLeft) { left = true; leftApps += owner }
+                if (coversRight) { right = true; rightApps += owner }
             }
+            DuoScreenCoverage.leftApps = leftApps
+            DuoScreenCoverage.rightApps = rightApps
             applyCoverage(left, right)
         } catch (_: Throwable) {
         }

@@ -263,8 +263,25 @@ class MainActivity : ComponentActivity() {
         try {
             val user = getSystemService(UserManager::class.java).getUserForSerialNumber(app.userSerial)
                 ?: throw IllegalStateException("Profile is unavailable")
+            if (user == android.os.Process.myUserHandle() && launchSecondWindow(app, bounds)) return
             getSystemService(LauncherApps::class.java).startMainActivity(app.component, user, screenBounds(bounds), launchOptions(bounds))
         } catch (_: Exception) { Toast.makeText(this, "${app.label} is unavailable.", Toast.LENGTH_SHORT).show(); model.refresh() }
+    }
+
+    /**
+     * Surface Duo: if the app is already open on the other screen, ask for a new window of it on the screen
+     * you tapped instead of moving the existing one over. Apps that allow several windows (Chrome, Edge,
+     * Docs) open a second one; others behave as before. Returns false when this doesn't apply.
+     */
+    private fun launchSecondWindow(app: AppEntry, bounds: android.graphics.Rect?): Boolean {
+        val hinge = CurrentDuoHinge.value ?: return false
+        val x = screenBounds(bounds)?.centerX() ?: return false
+        val tappedLeft = x < hinge.left
+        val otherScreenApps = if (tappedLeft) DuoScreenCoverage.rightApps else DuoScreenCoverage.leftApps
+        if (app.component.packageName !in otherScreenApps) return false
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(app.component)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        return runCatching { startActivity(intent, launchOptions(bounds)); true }.getOrDefault(false)
     }
 
     private fun screenBounds(bounds: android.graphics.Rect?): android.graphics.Rect? = bounds?.takeUnless { it.isEmpty }?.let {

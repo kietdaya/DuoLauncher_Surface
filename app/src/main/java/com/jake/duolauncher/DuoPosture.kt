@@ -82,4 +82,7 @@ object DuoScreenCoverage {
     val left = kotlinx.coroutines.flow.MutableStateFlow(false)
     val right = kotlinx.coroutines.flow.MutableStateFlow(false)
     fun set(left: Boolean, right: Boolean) { this.left.value = left; this.right.value = right }
+    /** Apps whose windows are on each screen, so tapping an app already open on the other screen can open a second window. */
+    @Volatile var leftApps: Set<String> = emptySet()
+    @Volatile var rightApps: Set<String> = emptySet()
 }
