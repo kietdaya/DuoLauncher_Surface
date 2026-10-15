@@ -43,7 +43,22 @@ jobs:
         run: ./scripts/export-public-source.sh "$RUNNER_TEMP/DuoLauncher-public"
       - name: Build, test, and lint
         working-directory: ${{ runner.temp }}/DuoLauncher-public
-        run: ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/build.log"
+      - name: Post build errors as a release note
+        # Build logs can't be read from outside GitHub; a release note's text can.
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out="$RUNNER_TEMP/errors.txt"
+          grep -E "^e: |^w: .*error|error:|What went wrong|FAILED|Lint found|Test.*FAILED|AssertionError" -A6 "$RUNNER_TEMP/build.log" | head -c 60000 > "$out" || true
+          for f in $(find "$RUNNER_TEMP/DuoLauncher-public/app/build" -name "lint-results-debug.txt" 2>/dev/null); do grep -B2 -A6 "Error:" "$f" | head -c 30000 >> "$out"; done
+          [ -s "$out" ] || tail -c 20000 "$RUNNER_TEMP/build.log" > "$out"
+          gh release delete ci-errors --yes --cleanup-tag -R "$GITHUB_REPOSITORY" || true
+          gh release create ci-errors -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Build errors (${GITHUB_SHA::7})" --notes-file "$out"
       - name: Publish the debug APK as "Latest dev build"
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
