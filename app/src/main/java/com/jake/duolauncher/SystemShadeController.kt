@@ -17,16 +17,45 @@ internal enum class ShadeOpenResult { OPENED, SERVICE_DISABLED, SERVICE_STARTING
  */
 class SystemShadeAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
-        // The declaration lets Settings describe the service. Once bound, unsubscribe from
-        // even our own package's events: global actions do not require event delivery.
-        serviceInfo = serviceInfo.apply { eventTypes = 0 }
         instance = WeakReference(this)
+        updateScreenCoverage()
     }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val type = event?.eventType ?: return
+        if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED || type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) updateScreenCoverage()
+    }
     override fun onInterrupt() = Unit
     override fun onDestroy() {
         if (instance.get() === this) instance.clear()
+        DuoScreenCoverage.set(left = false, right = false)
         super.onDestroy()
+    }
+
+    /**
+     * Works out which Surface Duo screens other apps' windows cover, from window positions only.
+     * Runs in the launcher's process, so it must never throw.
+     */
+    private fun updateScreenCoverage() {
+        try {
+            val hinge = CurrentDuoHinge.value ?: return DuoScreenCoverage.set(left = false, right = false)
+            var left = false
+            var right = false
+            val bounds = android.graphics.Rect()
+            for (window in windows) {
+                if (window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue
+                val root = window.root
+                val owner = root?.packageName?.toString()
+                if (owner == null || owner == packageName) continue
+                window.getBoundsInScreen(bounds)
+                if (bounds.width() <= 0 || bounds.height() <= 0) continue
+                val coversLeft = bounds.left < hinge.left && bounds.right > hinge.left / 2
+                val coversRight = bounds.right > hinge.right && bounds.left < hinge.right + (bounds.right - hinge.right) / 2
+                if (coversLeft) left = true
+                if (coversRight) right = true
+            }
+            DuoScreenCoverage.set(left, right)
+        } catch (_: Throwable) {
+        }
     }
 
     companion object {

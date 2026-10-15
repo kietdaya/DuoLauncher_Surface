@@ -76,3 +76,10 @@ internal fun rememberDuoHinge(activity: Activity): DuoHinge? {
 internal object CurrentDuoHinge {
     @Volatile var value: DuoHinge? = null
 }
+
+/** Which Duo screens other apps cover right now, as reported by the Duo Dev screens service. */
+object DuoScreenCoverage {
+    val left = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val right = kotlinx.coroutines.flow.MutableStateFlow(false)
+    fun set(left: Boolean, right: Boolean) { this.left.value = left; this.right.value = right }
+}

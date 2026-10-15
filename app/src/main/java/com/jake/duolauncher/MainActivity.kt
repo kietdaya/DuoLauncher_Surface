@@ -226,12 +226,9 @@ class MainActivity : ComponentActivity() {
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus) focusLostAt = android.os.SystemClock.uptimeMillis()
         if (hasFocus) setStatusMode(model.state.value.verticalStatus)
     }
-    private var focusLostAt = 0L
-    /** Bumped when the Home gesture lands on Home itself (the left screen on a Duo): show the app bar. */
-    internal val leftAppBarRequests = androidx.compose.runtime.mutableIntStateOf(0)
+
     override fun onSaveInstanceState(outState: Bundle) {
         widgets.save(outState)
         outState.putBoolean(SHADE_DIALOG_VISIBLE, shadeSetupDialog?.isShowing == true && !returningFromShadeSettings)
@@ -243,12 +240,6 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         FoldRenderExperiment.onNewIntent(this, intent)
         if (intent.getStringExtra("duo_destination") == "search") searchRequests.intValue++
-        else if (intent.hasCategory(Intent.CATEGORY_HOME) && isSurfaceDuo && CurrentDuoHinge.value != null &&
-            (hasWindowFocus() || android.os.SystemClock.uptimeMillis() - focusLostAt < 1500)) {
-            // Like Microsoft Launcher: the Home gesture on the screen Home is already showing, while an app
-            // uses the other screen, brings up the app bar there instead of resetting Home.
-            leftAppBarRequests.intValue++
-        }
         else if (intent.hasCategory(Intent.CATEGORY_HOME) || intent.getStringExtra("duo_destination") == "home") homeRequests.intValue++
         intent.removeExtra("duo_destination")
     }
@@ -414,7 +405,8 @@ class MainActivity : ComponentActivity() {
         LiveDiscover.host.get()?.statusMode(vertical)
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (vertical) controller.hide(WindowInsetsCompat.Type.statusBars()) else controller.show(WindowInsetsCompat.Type.statusBars())
+        // On a Surface Duo Android's status bar always shows: hiding it fights the Duo's system UI.
+        if (vertical && !isSurfaceDuo) controller.hide(WindowInsetsCompat.Type.statusBars()) else controller.show(WindowInsetsCompat.Type.statusBars())
     }
 
     private fun previewWallpaper() {

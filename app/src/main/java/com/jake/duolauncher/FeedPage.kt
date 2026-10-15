@@ -152,7 +152,6 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, 
 
     Column(modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp).testTag("feed-page"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        FeedHeader(now, use24h, style)
         WeatherPanel(weather, place, loaded = weatherLoaded, syncing = syncing, syncFailed = syncFailed, use24h = use24h,
             style = style, onSync = onSync)
         CalendarPanel(events, window, now, calendarAllowed, use24h, style, Modifier.weight(1f),
@@ -164,18 +163,6 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, 
             nowPlaying?.let { last[0] = it }
             last[0]?.let { NowPlayingPanel(it, style) }
         }
-    }
-}
-
-@Composable
-private fun FeedHeader(now: Long, use24h: Boolean, style: FeedStyle) {
-    val time = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault())
-    Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.Bottom) {
-        Text(time.format(DateTimeFormatter.ofPattern("EEEE d", Locale.getDefault())), Modifier.weight(1f),
-            color = style.ink, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Text(time.format(DateTimeFormatter.ofPattern(if (use24h) "MMM · HH:mm" else "MMM · h:mm", Locale.getDefault())).uppercase(),
-            color = style.muted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.5.sp,
-            modifier = Modifier.padding(bottom = 5.dp))
     }
 }
 

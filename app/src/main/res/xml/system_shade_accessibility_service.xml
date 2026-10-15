@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Reads only where app windows sit (to know which Surface Duo screen is free) and opens the shade.
+     It never reads what is inside other apps' windows. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/shade_service_description"
-    android:accessibilityEventTypes="typeViewClicked"
-    android:packageNames="com.kiet.duolauncher"
+    android:accessibilityEventTypes="typeWindowsChanged|typeWindowStateChanged"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:notificationTimeout="0"
-    android:canRetrieveWindowContent="false"
+    android:notificationTimeout="150"
+    android:canRetrieveWindowContent="true"
     android:canPerformGestures="false" />
