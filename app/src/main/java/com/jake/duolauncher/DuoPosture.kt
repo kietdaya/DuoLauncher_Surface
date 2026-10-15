@@ -3,6 +3,7 @@ package com.jake.duolauncher
 import android.app.Activity
 import android.os.Build
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -66,5 +67,12 @@ internal fun rememberDuoHinge(activity: Activity): DuoHinge? {
     val fallback = remember(activity, configuration.screenWidthDp, configuration.screenHeightDp, configuration.orientation) {
         surfaceDuoFallback(activity)
     }
-    return reported ?: fallback
+    val hinge = reported ?: fallback
+    SideEffect { CurrentDuoHinge.value = hinge }
+    return hinge
+}
+
+/** The hinge Home last measured, for code outside composition such as app launches. */
+internal object CurrentDuoHinge {
+    @Volatile var value: DuoHinge? = null
 }

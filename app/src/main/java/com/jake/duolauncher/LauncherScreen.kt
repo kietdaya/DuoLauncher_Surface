@@ -168,6 +168,12 @@ fun LauncherScreen(
     var pinQuery by rememberSaveable { mutableStateOf("") }
     val launcherActivity = androidx.activity.compose.LocalActivity.current as MainActivity
     val duoHinge = rememberDuoHinge(launcherActivity)
+    // Surface Duo: the app bar (and All apps) on the left screen, for when an app covers the right one.
+    var leftAppBar by remember { mutableStateOf(false) }
+    var leftAllApps by remember { mutableStateOf(false) }
+    var leftLibraryQuery by remember { mutableStateOf("") }
+    val leftBarRequests = launcherActivity.leftAppBarRequests.intValue
+    LaunchedEffect(leftBarRequests) { if (leftBarRequests > 0) { leftAllApps = false; leftAppBar = true } }
     val launcherRootView = LocalView.current.rootView
     DisposableEffect(sheet == "widgets") {
         val active = sheet == "widgets"
@@ -279,6 +285,7 @@ fun LauncherScreen(
         val page = pager.currentPage.takeIf { it in 0 until homePages }
             ?: lastHomePage.coerceIn(0, homePages - 1)
         drag.clear(); widgetSession = null; resizeSlot = null; sheet = ""; widgetPackage = null
+        leftAppBar = false; leftAllApps = false
         widgetExactTarget = false; widgetPlacementMessage = null; selectedId = null; appMoveMenu = false
         openFolderId = null; createFolderFirstId = null; emptyCellIndex = null
         focus.clearFocus(); keyboard?.hide()
@@ -518,7 +525,9 @@ fun LauncherScreen(
                             !nativeWidgetConsumesVerticalGesture(launcherRootView, screenPoint)
                     }
                 },
-                onDownwardSwipe = launcherActivity::openSystemShade,
+                // Duo with the status rail: Android's bar stays hidden and Home never opens the shade itself
+                // (that crashes the Duo's system UI). Swipe from the top edge to reach notifications.
+                onDownwardSwipe = if (launcherActivity.isSurfaceDuo && state.verticalStatus) null else launcherActivity::openSystemShade,
                 onLeadingOverscroll = if (firstHome == 0) onDiscover else null,
             )) {
             val pagerModifier = Modifier.fillMaxHeight().width(pagerWidth)
@@ -551,6 +560,7 @@ fun LauncherScreen(
                         visibleHomePages = visibleHomePages, panelWidth = panelWidth,
                         dualScreen = split != null,
                         feedLatitude = appearance.latitude, feedLongitude = appearance.longitude, feedPlaceName = appearance.place,
+                        onLeftSwipeUp = { leftAllApps = false; leftAppBar = true },
                         contentHeight = contentHeight, bottomSpace = bottomSpace, geometry = geometry,
                         state = state, previewSlots = previewLayout.slots, previewLeadingSlots = previewLayout.leadingSlots,
                         previewWidgetPlacements = previewLayout.widgetPlacements, appsById = appsById,
@@ -1221,6 +1231,29 @@ fun LauncherScreen(
                 dismissButton = { TextButton(onClick = widgets::cancelPendingReconfigure,
                     modifier = Modifier.testTag("widget-reconfigure-cancel")) { Text("Cancel") } })
         }
+        // Surface Duo: app bar on the left screen, from a swipe up there or the Home gesture on it.
+        if (split != null && (leftAppBar || leftAllApps)) {
+            BackHandler { leftAppBar = false; leftAllApps = false }
+            Box(Modifier.width(split.screenWidth.dp).fillMaxHeight().testTag("left-app-bar-scrim")
+                .background(Color.Black.copy(alpha = if (leftAllApps) .35f else .12f))
+                .pointerInput(Unit) { detectTapGestures { leftAppBar = false; leftAllApps = false } })
+        }
+        if (split != null) {
+            androidx.compose.animation.AnimatedVisibility(leftAppBar && !leftAllApps,
+                modifier = Modifier.align(Alignment.BottomStart).width(split.screenWidth.dp),
+                enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.slideOutVertically { it } + androidx.compose.animation.fadeOut()) {
+                LeftAppBar(state.dock.mapNotNull { id -> id?.let { appsById[it] } },
+                    onLaunch = { app, bounds -> leftAppBar = false; onLaunchFrom(app, bounds) },
+                    onAllApps = { leftAllApps = true },
+                    onDismiss = { leftAppBar = false })
+            }
+            if (leftAllApps) AppLibrary(state, leftLibraryQuery, { leftLibraryQuery = it }, onLaunch, model::setPinned,
+                onActions = { selectedId = it.id },
+                modifier = Modifier.width(split.screenWidth.dp).fillMaxHeight().padding(16.dp).testTag("left-library"),
+                onLaunchFrom = { app, bounds -> leftAllApps = false; leftAppBar = false; onLaunchFrom(app, bounds) },
+                onTurnOnWork = { model.turnOnWork(it) })
+        }
         }
     }
 }
@@ -1236,6 +1269,7 @@ private fun ExpandedWorkspace(
     feedLatitude: Double?,
     feedLongitude: Double?,
     feedPlaceName: String,
+    onLeftSwipeUp: () -> Unit,
     contentHeight: Dp,
     bottomSpace: Dp,
     geometry: HomeGeometry,
@@ -1322,7 +1356,15 @@ private fun ExpandedWorkspace(
         if (showLeading) {
             if (dualScreen) key("duo-feed") {
                 // Surface Duo: the left page is the feed, one full screen wide.
-                Box(Modifier.place(leadingX).width(geometry.homeWidth.dp).fillMaxHeight()) {
+                Box(Modifier.place(leadingX).width(geometry.homeWidth.dp).fillMaxHeight()
+                    .pointerInput(Unit) {
+                        // Swipe up on the left screen brings up the app bar, like Microsoft Launcher.
+                        var total = 0f
+                        androidx.compose.foundation.gestures.detectVerticalDragGestures(
+                            onDragStart = { total = 0f },
+                            onDragEnd = { if (total < -56.dp.toPx()) onLeftSwipeUp() },
+                        ) { _, dy -> total += dy }
+                    }) {
                     FeedPage(feedLatitude, feedLongitude, feedPlaceName)
                 }
             } else key("expanded-leading-home") {

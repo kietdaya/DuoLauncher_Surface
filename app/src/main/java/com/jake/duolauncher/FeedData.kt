@@ -68,12 +68,12 @@ suspend fun loadFeedEvents(context: Context, from: Long, to: Long): List<FeedEve
     }.getOrDefault(emptyList())
 }
 
-fun openCalendarEvent(context: Context, event: FeedEvent) {
+fun openCalendarEvent(context: Context, event: FeedEvent, options: android.os.Bundle? = null) {
     val intent = Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, event.id))
         .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, event.begin)
         .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, event.end)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    runCatching { context.startActivity(intent) }
+    runCatching { context.startActivity(intent, options) }
 }
 
 // ---------- Weather ----------

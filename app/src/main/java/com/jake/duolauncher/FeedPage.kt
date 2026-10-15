@@ -87,6 +87,7 @@ private val Mono = FontFamily.Monospace
 @Composable
 internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val leftOptions = leftScreenOptions()
     val style = FeedStyle.of(LocalDuoPalette.current)
     val use24h = DateFormat.is24HourFormat(context)
 
@@ -156,7 +157,7 @@ internal fun FeedPage(latitude: Double?, longitude: Double?, placeName: String, 
             style = style, onSync = onSync)
         CalendarPanel(events, window, now, calendarAllowed, use24h, style, Modifier.weight(1f),
             onAllow = { requestCalendar.launch(Manifest.permission.READ_CALENDAR) },
-            onOpen = { openCalendarEvent(context, it) })
+            onOpen = { openCalendarEvent(context, it, leftOptions) })
         AnimatedVisibility(nowPlaying != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             // Keep showing the last track while the panel animates out.
             val last = remember { arrayOfNulls<NowPlaying>(1) }
@@ -358,6 +359,7 @@ private fun Timeline(events: List<FeedEvent>, window: FeedWindow, now: Long, use
 @Composable
 private fun NowPlayingPanel(playing: NowPlaying, style: FeedStyle) {
     val context = LocalContext.current
+    val options = leftScreenOptions()
     val appName = remember(playing.controller.packageName) {
         runCatching {
             context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(playing.controller.packageName, 0)).toString()
@@ -368,7 +370,7 @@ private fun NowPlayingPanel(playing: NowPlaying, style: FeedStyle) {
     val controls = playing.controller.transportControls
     FeedPanel(style, Modifier.testTag("feed-now-playing")) {
         PanelLabel("Now playing", appName, style)
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp).clickable { runCatching { playing.controller.sessionActivity?.send() } },
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp).clickable { runCatching { playing.controller.sessionActivity?.send(context, 0, null, null, null, null, options) } },
             verticalAlignment = Alignment.CenterVertically) {
             val artShape = RoundedCornerShape(10.dp)
             if (playing.art != null) Image(playing.art.asImageBitmap(), null, Modifier.size(56.dp).clip(artShape), contentScale = ContentScale.Crop)
@@ -392,3 +394,8 @@ private fun NowPlayingPanel(playing: NowPlaying, style: FeedStyle) {
         }
     }
 }
+
+/** The feed lives on the Duo's left screen, so whatever it opens should open there too. */
+@Composable
+private fun leftScreenOptions(): android.os.Bundle? =
+    (androidx.activity.compose.LocalActivity.current as? MainActivity)?.duoLaunchOptions(left = true)

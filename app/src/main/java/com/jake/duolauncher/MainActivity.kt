@@ -156,17 +156,6 @@ class MainActivity : ComponentActivity() {
         // The Surface Duo's system UI crashes and restarts when an app opens Quick Settings directly,
         // whichever way it is asked. Open notifications instead; Quick Settings is one more pull down.
         val panel = if (isSurfaceDuo) ShadePanel.NOTIFICATIONS else requested
-        if (isSurfaceDuo && model.state.value.verticalStatus) {
-            // The Duo's system UI can't expand the shade while our window hides the status bar.
-            // Bring the bar back first; it hides again when Home regains focus after the shade closes.
-            WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
-            window.decorView.postDelayed({ openShadePanel(panel) }, 200)
-            return
-        }
-        openShadePanel(panel)
-    }
-
-    private fun openShadePanel(panel: ShadePanel) {
         // Android 12L lets a launcher open the shade itself; accessibility is only the fallback.
         if (expandShadeDirectly(panel)) return
         when (SystemShadeAccessibilityService.open(this, panel)) {
@@ -179,7 +168,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val isSurfaceDuo = android.os.Build.MANUFACTURER.equals("Microsoft", ignoreCase = true) &&
+    internal val isSurfaceDuo = android.os.Build.MANUFACTURER.equals("Microsoft", ignoreCase = true) &&
         android.os.Build.MODEL.startsWith("Surface Duo", ignoreCase = true)
 
     /**
@@ -237,8 +226,12 @@ class MainActivity : ComponentActivity() {
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) focusLostAt = android.os.SystemClock.uptimeMillis()
         if (hasFocus) setStatusMode(model.state.value.verticalStatus)
     }
+    private var focusLostAt = 0L
+    /** Bumped when the Home gesture lands on Home itself (the left screen on a Duo): show the app bar. */
+    internal val leftAppBarRequests = androidx.compose.runtime.mutableIntStateOf(0)
     override fun onSaveInstanceState(outState: Bundle) {
         widgets.save(outState)
         outState.putBoolean(SHADE_DIALOG_VISIBLE, shadeSetupDialog?.isShowing == true && !returningFromShadeSettings)
@@ -250,6 +243,12 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         FoldRenderExperiment.onNewIntent(this, intent)
         if (intent.getStringExtra("duo_destination") == "search") searchRequests.intValue++
+        else if (intent.hasCategory(Intent.CATEGORY_HOME) && isSurfaceDuo && CurrentDuoHinge.value != null &&
+            (hasWindowFocus() || android.os.SystemClock.uptimeMillis() - focusLostAt < 1500)) {
+            // Like Microsoft Launcher: the Home gesture on the screen Home is already showing, while an app
+            // uses the other screen, brings up the app bar there instead of resetting Home.
+            leftAppBarRequests.intValue++
+        }
         else if (intent.hasCategory(Intent.CATEGORY_HOME) || intent.getStringExtra("duo_destination") == "home") homeRequests.intValue++
         intent.removeExtra("duo_destination")
     }
@@ -272,7 +271,28 @@ class MainActivity : ComponentActivity() {
         android.graphics.Rect(it).apply { offset(location[0], location[1]) }
     }
     private fun launchOptions(bounds: android.graphics.Rect?): Bundle? = bounds?.takeUnless { it.isEmpty }?.let {
-        android.app.ActivityOptions.makeScaleUpAnimation(window.decorView, it.left, it.top, it.width(), it.height()).toBundle()
+        android.app.ActivityOptions.makeScaleUpAnimation(window.decorView, it.left, it.top, it.width(), it.height())
+            .also { options -> duoScreenAt(screenBounds(it)?.centerX())?.let(options::setLaunchBounds) }.toBundle()
+    }
+
+    /**
+     * On a Surface Duo, the screen containing [xOnScreen]. Passing it as launch bounds asks Android to open
+     * the app on the screen you tapped instead of under whatever is on the other screen.
+     */
+    private fun duoScreenAt(xOnScreen: Int?): android.graphics.Rect? {
+        val hinge = CurrentDuoHinge.value ?: return null
+        if (xOnScreen == null) return null
+        val width = window.decorView.width.takeIf { it > 0 } ?: return null
+        val height = window.decorView.height.takeIf { it > 0 } ?: return null
+        return if (xOnScreen < hinge.left) android.graphics.Rect(0, 0, hinge.left, height)
+        else android.graphics.Rect(hinge.right, 0, width, height)
+    }
+
+    /** Launch options that open on the left (true) or right (false) Duo screen; null when not on a Duo. */
+    internal fun duoLaunchOptions(left: Boolean?): Bundle? {
+        val hinge = CurrentDuoHinge.value ?: return null
+        val x = when (left) { true -> 0; false -> hinge.right; null -> return null }
+        return duoScreenAt(x)?.let { android.app.ActivityOptions.makeBasic().setLaunchBounds(it).toBundle() }
     }
     private fun openGoogleSearch(bounds: android.graphics.Rect?): Boolean = try {
         startActivity(googleSearchIntent().apply { sourceBounds = screenBounds(bounds) }, launchOptions(bounds))
