@@ -172,6 +172,8 @@ fun LauncherScreen(
     // Surface Duo: All apps on the left screen, from a swipe up there.
     var leftAllApps by remember { mutableStateOf(false) }
     var leftLibraryQuery by remember { mutableStateOf("") }
+    // The feed as a full-screen page, for single-screen Home where it has no page of its own.
+    var feedOverlay by remember { mutableStateOf(false) }
     // Which screens other apps cover, from the Duo Dev screens accessibility service. With an app on the
     // right screen only, Home becomes a complete single-screen Home on the left: pages, dock, All apps.
     val rightCovered by DuoScreenCoverage.right.collectAsState()
@@ -288,7 +290,7 @@ fun LauncherScreen(
         val page = pager.currentPage.takeIf { it in 0 until homePages }
             ?: lastHomePage.coerceIn(0, homePages - 1)
         drag.clear(); widgetSession = null; resizeSlot = null; sheet = ""; widgetPackage = null
-        leftAllApps = false
+        leftAllApps = false; feedOverlay = false
         widgetExactTarget = false; widgetPlacementMessage = null; selectedId = null; appMoveMenu = false
         openFolderId = null; createFolderFirstId = null; emptyCellIndex = null
         focus.clearFocus(); keyboard?.hide()
@@ -544,7 +546,7 @@ fun LauncherScreen(
                 // Duo with the status rail: Android's bar stays hidden and Home never opens the shade itself
                 // (that crashes the Duo's system UI). Swipe from the top edge to reach notifications.
                 onDownwardSwipe = launcherActivity::openSystemShade,
-                onLeadingOverscroll = if (firstHome == 0) onDiscover else null,
+                onLeadingOverscroll = null, // Discover is not used
             )) {
             // Home on the Duo's left screen (an app has the right one): mirror the layout so the dock and
             // status sit on the outer left edge instead of against the hinge.
@@ -558,8 +560,6 @@ fun LauncherScreen(
                     drawLayer(homeLayer)
                     LiveDiscover.host.get()?.invalidateFrame()
                 }.testTag("app-pager")
-                .discoverSwipe(firstHome == 0 && pager.currentPage == 0 && !drag.active && sheet.isEmpty() &&
-                    !showFirstRun && selectedId == null, onDiscover)
                 .onGloballyPositioned {
                     if (firstHome > 0) {
                         val bounds = it.boundsInWindow()
@@ -655,8 +655,11 @@ fun LauncherScreen(
                     Icon(Icons.Rounded.Home, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Set as home app")
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                    if (!drag.active) IconButton(onClick = openDiscover, Modifier.size(32.dp).testTag("discover-page-link")) {
-                        Icon(Icons.Rounded.Explore, "Discover", tint = Color.White.copy(alpha = .65f), modifier = Modifier.size(17.dp))
+                    // Feed button (replaces Discover): the feed's page on a spanned Duo, otherwise the feed full screen.
+                    if (!drag.active) IconButton(onClick = {
+                        if (split != null) scope.launch { pager.animateScrollToPage(0) } else feedOverlay = true
+                    }, Modifier.size(32.dp).testTag("feed-page-link")) {
+                        Icon(Icons.Rounded.Dashboard, "Feed", tint = Color.White.copy(alpha = .65f), modifier = Modifier.size(17.dp))
                     }
                     if (visibleHomePages <= 6) repeat(visibleHomePages) { index ->
                         Box(Modifier.size(28.dp).clip(CircleShape).clickable { scope.launch { pager.animateScrollToPage(index) } }
@@ -1252,6 +1255,16 @@ fun LauncherScreen(
                     modifier = Modifier.testTag("widget-reconfigure-resume")) { Text("Resume") } },
                 dismissButton = { TextButton(onClick = widgets::cancelPendingReconfigure,
                     modifier = Modifier.testTag("widget-reconfigure-cancel")) { Text("Cancel") } })
+        }
+        if (feedOverlay) {
+            BackHandler { feedOverlay = false }
+            Box(Modifier.fillMaxSize().testTag("feed-overlay")) {
+                DuneWallpaper()
+                FeedPage(appearance.latitude, appearance.longitude, appearance.place)
+                IconButton(onClick = { feedOverlay = false }, Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+                    Icon(Icons.Rounded.Close, "Close feed", tint = Color.White.copy(alpha = .8f))
+                }
+            }
         }
         // Surface Duo: All apps on the left screen, from a swipe up there. Back or a tap outside closes it.
         if (split != null && leftAllApps) {
