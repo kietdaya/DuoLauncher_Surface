@@ -60,17 +60,24 @@ class SystemShadeAccessibilityService : AccessibilityService() {
             // Keep the last answer instead of briefly deciding a screen is free.
             if (all.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM &&
                     run { it.getBoundsInScreen(bounds); bounds.height() > hinge.left / 2 } }) return
+            val screenWidth = hinge.left
+            val screenHeight = resources.displayMetrics.heightPixels
             for (window in all) {
                 if (window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue
-                val root = window.root
-                val owner = root?.packageName?.toString()
-                if (owner == null || owner == packageName) continue
                 window.getBoundsInScreen(bounds)
                 if (bounds.width() <= 0 || bounds.height() <= 0) continue
-                val coversLeft = bounds.left < hinge.left && bounds.right > hinge.left / 2
-                val coversRight = bounds.right > hinge.right && bounds.left < hinge.right + (bounds.right - hinge.right) / 2
-                if (coversLeft) { left = true; leftApps += owner }
-                if (coversRight) { right = true; rightApps += owner }
+                val spansBoth = bounds.left < hinge.left && bounds.right > hinge.right
+                // Apps can briefly report no owner (Chrome does while a page loads). Don't read that as the
+                // screen being free: an unnamed one-screen window still counts. Only Home spans both screens
+                // with no name worth trusting, so an unnamed spanning window is skipped.
+                val owner = runCatching { window.root?.packageName?.toString() }.getOrNull()
+                if (owner == packageName || (owner == null && spansBoth)) continue
+                // Only windows filling most of a screen count; popups and menus don't take a screen over.
+                if (bounds.height() < screenHeight / 2) continue
+                val onLeft = minOf(bounds.right, hinge.left) - maxOf(bounds.left, 0)
+                val onRight = minOf(bounds.right, hinge.right + screenWidth) - maxOf(bounds.left, hinge.right)
+                if (onLeft >= screenWidth / 2) { left = true; owner?.let { leftApps += it } }
+                if (onRight >= screenWidth / 2) { right = true; owner?.let { rightApps += it } }
             }
             DuoScreenCoverage.leftApps = leftApps
             DuoScreenCoverage.rightApps = rightApps
@@ -79,7 +86,7 @@ class SystemShadeAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Covering applies at once; freeing a screen waits half a second so brief window changes don't flip Home. */
+    /** Covering applies at once; freeing a screen waits a second so brief window changes don't flip Home. */
     private fun applyCoverage(left: Boolean, right: Boolean) {
         pendingUncover?.let(main::removeCallbacks); pendingUncover = null
         val freesLeft = DuoScreenCoverage.left.value && !left
@@ -87,7 +94,7 @@ class SystemShadeAccessibilityService : AccessibilityService() {
         if (!freesLeft && !freesRight) return DuoScreenCoverage.set(left, right)
         // Apply any new covering now, keep a screen that might be freeing until it stays free.
         DuoScreenCoverage.set(left || DuoScreenCoverage.left.value, right || DuoScreenCoverage.right.value)
-        pendingUncover = Runnable { pendingUncover = null; DuoScreenCoverage.set(left, right) }.also { main.postDelayed(it, 500) }
+        pendingUncover = Runnable { pendingUncover = null; DuoScreenCoverage.set(left, right) }.also { main.postDelayed(it, 1000) }
     }
 
     companion object {
