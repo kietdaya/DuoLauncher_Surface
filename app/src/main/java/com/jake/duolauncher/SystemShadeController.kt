@@ -86,7 +86,7 @@ class SystemShadeAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Covering applies at once; freeing a screen waits a second so brief window changes don't flip Home. */
+    /** Covering applies at once; freeing a screen waits about a third of a second so brief window changes don't flip Home. */
     private fun applyCoverage(left: Boolean, right: Boolean) {
         pendingUncover?.let(main::removeCallbacks); pendingUncover = null
         val freesLeft = DuoScreenCoverage.left.value && !left
@@ -94,7 +94,7 @@ class SystemShadeAccessibilityService : AccessibilityService() {
         if (!freesLeft && !freesRight) return DuoScreenCoverage.set(left, right)
         // Apply any new covering now, keep a screen that might be freeing until it stays free.
         DuoScreenCoverage.set(left || DuoScreenCoverage.left.value, right || DuoScreenCoverage.right.value)
-        pendingUncover = Runnable { pendingUncover = null; DuoScreenCoverage.set(left, right) }.also { main.postDelayed(it, 1000) }
+        pendingUncover = Runnable { pendingUncover = null; DuoScreenCoverage.set(left, right) }.also { main.postDelayed(it, 340) }
     }
 
     companion object {

@@ -32,6 +32,9 @@ import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateIntOffsetAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.LocalIndication
@@ -180,6 +183,23 @@ fun LauncherScreen(
     val rightCovered by DuoScreenCoverage.right.collectAsState()
     val leftCovered by DuoScreenCoverage.left.collectAsState()
     val homeOnLeft = duoHinge != null && rightCovered && !leftCovered
+    // Back from one-screen Home: the full layout glides in from the left, so Home and its dock travel from
+    // the left screen to the right one and the feed slides in behind them, instead of snapping in one frame.
+    val homeGlide = remember { Animatable(0f) }
+    var glideFromLeft by remember { mutableStateOf(homeOnLeft) }
+    // True only in the frame where Home leaves the left screen, before the glide has started.
+    val glidePending = glideFromLeft && !homeOnLeft
+    val glideDistance = (duoHinge?.right ?: 0).toFloat()
+    LaunchedEffect(homeOnLeft) {
+        if (glideFromLeft && !homeOnLeft && glideDistance > 0f) {
+            homeGlide.snapTo(-glideDistance)
+            glideFromLeft = false
+            homeGlide.animateTo(0f, tween(480, easing = CubicBezierEasing(.22f, .8f, .2f, 1f)))
+        } else {
+            glideFromLeft = homeOnLeft
+            homeGlide.snapTo(0f)
+        }
+    }
     val launcherRootView = LocalView.current.rootView
     DisposableEffect(sheet == "widgets") {
         val active = sheet == "widgets"
@@ -441,7 +461,9 @@ fun LauncherScreen(
             .let { if (state.verticalStatus) it.exclude(WindowInsets.statusBars) else it } else WindowInsets.safeDrawing
         val homeArea = if (homeOnLeft) Modifier.fillMaxHeight().width(with(LocalDensity.current) { duoHinge!!.left.toDp() })
             else Modifier.fillMaxSize()
-        BoxWithConstraints(homeArea.windowInsetsPadding(homeInsets)) {
+        BoxWithConstraints(homeArea
+            .graphicsLayer { translationX = if (glidePending) -glideDistance else homeGlide.value }
+            .windowInsetsPadding(homeInsets)) {
             val wide = maxWidth.value >= 650f
             val preset = if (wide) state.expanded else state.compact
             val density = LocalDensity.current

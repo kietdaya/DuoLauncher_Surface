@@ -32,6 +32,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 
 /*
@@ -154,7 +155,7 @@ suspend fun syncFeedPlace(context: Context): PlaceSyncResult {
     if (!hasLocationAccess(context)) return PlaceSyncResult(null, "Location permission is off for Duo Dev.")
     val manager = context.getSystemService(LocationManager::class.java)
     if (!runCatching { manager.isLocationEnabled }.getOrDefault(true))
-        return PlaceSyncResult(null, "Turn on Location for a moment, then tap Sync.")
+        return PlaceSyncResult(null, "Turn on Location for a moment and tap Sync, or tap City to type your town.")
     val enabled = runCatching { manager.getProviders(true) }.getOrDefault(emptyList())
     val newest = enabled.mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
     val recent = newest?.takeIf { System.currentTimeMillis() - it.time <= 30 * 60_000L }
@@ -172,7 +173,7 @@ suspend fun syncFeedPlace(context: Context): PlaceSyncResult {
             if (found != null) break
         }
         found ?: newest
-    } ?: return PlaceSyncResult(null, "Couldn't get a location fix. Try again on Wi-Fi or near a window.")
+    } ?: return PlaceSyncResult(null, "Couldn't get a location fix. Tap City to type your town instead.")
     val name = withContext(Dispatchers.IO) {
         runCatching {
             @Suppress("DEPRECATION")
@@ -181,6 +182,34 @@ suspend fun syncFeedPlace(context: Context): PlaceSyncResult {
         }.getOrNull()
     } ?: ""
     return PlaceSyncResult(FeedPlace(location.latitude, location.longitude, name).also { FeedPlaceStore.save(context, it) }, null)
+}
+
+/**
+ * Towns matching [query] from Open-Meteo's place search, narrowed by anything after a comma ("Erie, PA").
+ * Null when the search couldn't reach the service. Only the typed text is sent, never the Duo's location.
+ */
+suspend fun searchPlaces(query: String): List<PlaceMatch>? = withContext(Dispatchers.IO) {
+    val (town, hint) = splitPlaceQuery(query)
+    if (town.length < 2) return@withContext emptyList()
+    val language = Locale.getDefault().language.takeIf { it.length == 2 } ?: "en"
+    val url = URL("https://geocoding-api.open-meteo.com/v1/search?count=10&format=json&language=$language&name=" +
+        URLEncoder.encode(town, "UTF-8"))
+    runCatching {
+        val connection = (url.openConnection() as HttpURLConnection).apply { connectTimeout = 8000; readTimeout = 8000 }
+        try {
+            val results = JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optJSONArray("results")
+            val matches = (0 until (results?.length() ?: 0)).mapNotNull { i ->
+                val r = results!!.getJSONObject(i)
+                if (!r.has("latitude") || !r.has("longitude")) null
+                else PlaceMatch(
+                    name = r.optString("name"), region = r.optString("admin1"), country = r.optString("country"),
+                    countryCode = r.optString("country_code"), latitude = r.getDouble("latitude"), longitude = r.getDouble("longitude"))
+            }
+            rankPlaceMatches(matches, hint).take(5)
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrNull()
 }
 
 /**
@@ -198,12 +227,19 @@ object FeedPlaceSync {
         if (!loaded) { loaded = true; place.value = FeedPlaceStore.load(context) }
     }
 
+    /** Uses a town picked from the City search, without reading the Duo's location. */
+    fun choose(context: Context, match: PlaceMatch) {
+        val picked = FeedPlace(match.latitude, match.longitude, match.name)
+        FeedPlaceStore.save(context.applicationContext, picked)
+        place.value = picked; problem.value = null
+    }
+
     fun start(context: Context) {
         if (syncing.value) return
         val app = context.applicationContext
         syncing.value = true; problem.value = null
         scope.launch {
-            val result = try { syncFeedPlace(app) } catch (_: Throwable) { PlaceSyncResult(null, "Couldn't get a location fix.") }
+            val result = try { syncFeedPlace(app) } catch (_: Throwable) { PlaceSyncResult(null, "Couldn't get a location fix. Tap City to type your town instead.") }
             result.place?.let { place.value = it }
             problem.value = result.problem
             syncing.value = false

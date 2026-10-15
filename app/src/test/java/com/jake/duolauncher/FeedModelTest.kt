@@ -68,4 +68,27 @@ class FeedModelTest {
         assertEquals(1f, temperatureFraction(70.0, 49.0, 63.0), 0f)
         assertEquals(.5f, temperatureFraction(50.0, 50.0, 50.0), 0f)
     }
+
+    private fun town(name: String, region: String, code: String = "US", country: String = "United States") =
+        PlaceMatch(name, region, country, code, 0.0, 0.0)
+
+    @Test fun `place query splits the town from its state`() {
+        assertEquals("Erie" to "PA", splitPlaceQuery(" Erie , PA "))
+        assertEquals("Erie" to null, splitPlaceQuery("Erie"))
+        assertEquals("" to null, splitPlaceQuery(" , "))
+    }
+
+    @Test fun `state hints narrow same-named towns`() {
+        val all = listOf(town("Erie", "Pennsylvania"), town("Erie", "Colorado"), town("Erie", "Illinois"))
+        assertEquals(listOf("Pennsylvania"), rankPlaceMatches(all, "PA").map { it.region })
+        assertEquals(listOf("Colorado"), rankPlaceMatches(all, "colo").map { it.region })
+        assertEquals(all, rankPlaceMatches(all, "US"))
+        assertEquals(all, rankPlaceMatches(all, null))
+    }
+
+    @Test fun `a hint that fits nothing keeps every town`() {
+        val all = listOf(town("Erie", "Pennsylvania"), town("Erie", "Colorado"))
+        assertEquals(all, rankPlaceMatches(all, "Ontario"))
+        assertEquals("Pennsylvania, US", all[0].label)
+    }
 }

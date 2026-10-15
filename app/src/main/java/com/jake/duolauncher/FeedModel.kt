@@ -88,3 +88,46 @@ fun rainHint(hours: List<Pair<String, Int>>, nowLocal: String, threshold: Int = 
 /** Where the current temperature sits between today's low and high, for the dial. */
 fun temperatureFraction(current: Double, low: Double, high: Double): Float =
     if (high <= low) .5f else ((current - low) / (high - low)).toFloat().coerceIn(0f, 1f)
+
+/** A town from the weather service's place search. */
+data class PlaceMatch(
+    val name: String, val region: String, val country: String, val countryCode: String,
+    val latitude: Double, val longitude: Double,
+) {
+    /** "Pennsylvania, US": what tells two towns of the same name apart. */
+    val label get() = listOf(region, countryCode).filter { it.isNotBlank() }.joinToString(", ")
+}
+
+private val UsStates = mapOf(
+    "AL" to "Alabama", "AK" to "Alaska", "AZ" to "Arizona", "AR" to "Arkansas", "CA" to "California",
+    "CO" to "Colorado", "CT" to "Connecticut", "DE" to "Delaware", "DC" to "District of Columbia", "FL" to "Florida",
+    "GA" to "Georgia", "HI" to "Hawaii", "ID" to "Idaho", "IL" to "Illinois", "IN" to "Indiana", "IA" to "Iowa",
+    "KS" to "Kansas", "KY" to "Kentucky", "LA" to "Louisiana", "ME" to "Maine", "MD" to "Maryland",
+    "MA" to "Massachusetts", "MI" to "Michigan", "MN" to "Minnesota", "MS" to "Mississippi", "MO" to "Missouri",
+    "MT" to "Montana", "NE" to "Nebraska", "NV" to "Nevada", "NH" to "New Hampshire", "NJ" to "New Jersey",
+    "NM" to "New Mexico", "NY" to "New York", "NC" to "North Carolina", "ND" to "North Dakota", "OH" to "Ohio",
+    "OK" to "Oklahoma", "OR" to "Oregon", "PA" to "Pennsylvania", "RI" to "Rhode Island", "SC" to "South Carolina",
+    "SD" to "South Dakota", "TN" to "Tennessee", "TX" to "Texas", "UT" to "Utah", "VT" to "Vermont",
+    "VA" to "Virginia", "WA" to "Washington", "WV" to "West Virginia", "WI" to "Wisconsin", "WY" to "Wyoming",
+)
+
+/** Splits "Erie, PA" into the town to search for and the part that narrows it down. */
+fun splitPlaceQuery(query: String): Pair<String, String?> {
+    val parts = query.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    return (parts.firstOrNull() ?: "") to parts.drop(1).joinToString(" ").ifBlank { null }
+}
+
+/**
+ * Keeps the towns that fit [hint] (a state, its US abbreviation, or a country), in the service's order.
+ * If nothing fits, every town is kept, so a typo in the hint never hides the result.
+ */
+fun rankPlaceMatches(matches: List<PlaceMatch>, hint: String?): List<PlaceMatch> {
+    val h = hint?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return matches
+    val state = UsStates[h.uppercase()]?.lowercase()
+    val fitting = matches.filter { m ->
+        val region = m.region.lowercase()
+        region.startsWith(h) || (state != null && region == state) ||
+            m.countryCode.equals(h, ignoreCase = true) || m.country.lowercase().startsWith(h)
+    }
+    return fitting.ifEmpty { matches }
+}

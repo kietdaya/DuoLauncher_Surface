@@ -2,6 +2,19 @@ package com.jake.duolauncher
 
 import android.Manifest
 import android.text.format.DateFormat
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -201,19 +214,35 @@ private fun hourLabel(hourOfDay: Int, use24h: Boolean) =
 private fun WeatherPanel(weather: FeedWeather?, place: FeedPlace?, loaded: Boolean, syncing: Boolean, syncProblem: String?,
     use24h: Boolean, style: FeedStyle, onSync: () -> Unit) {
     FeedPanel(style, Modifier.testTag("feed-weather")) {
+        val context = LocalContext.current
+        var searching by remember { mutableStateOf(false) }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(("Weather" + (place?.name?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")).uppercase(), Modifier.weight(1f),
                 color = style.muted, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.6.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Type a town instead: never reads the Duo's location.
+            Row(Modifier.clip(RoundedCornerShape(8.dp)).background(if (searching) style.signal.copy(alpha = .16f) else Color.Transparent)
+                .clickable { searching = !searching }.padding(horizontal = 8.dp, vertical = 4.dp).testTag("feed-weather-city"),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Icon(Icons.Rounded.Search, null, tint = if (searching) style.signal else style.ink, modifier = Modifier.size(12.dp))
+                Text("CITY", color = if (searching) style.signal else style.ink, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.6.sp)
+            }
             // Reads the location once, only on tap. Nothing runs in the background.
             Text(if (syncing) "SYNCING…" else "↻ SYNC", Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !syncing, onClick = onSync)
                 .padding(horizontal = 8.dp, vertical = 4.dp).testTag("feed-weather-sync"),
                 color = if (syncing) style.muted else style.ink, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.6.sp)
         }
+        if (searching) {
+            PlaceSearch(style, onPick = { FeedPlaceSync.choose(context, it); searching = false }, onClose = { searching = false })
+            return@FeedPanel
+        }
         if (!syncing) syncProblem?.let { Text(it, color = style.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
         if (place == null) {
-            Text("Tap Sync to show weather for where you are. Your location is read once, only when you tap.",
+            Text("Sync reads your location once, only when you tap. Or type your town instead.",
                 color = style.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp))
-            FeedKey(if (syncing) "Syncing…" else "Sync location", style, Modifier.fillMaxWidth(), height = 40.dp, onClick = onSync)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FeedKey(if (syncing) "Syncing…" else "Sync location", style, Modifier.weight(1f), height = 40.dp, onClick = onSync)
+                FeedKey("Type city", style, Modifier.weight(1f), height = 40.dp, onClick = { searching = true })
+            }
             return@FeedPanel
         }
         if (weather == null) {
@@ -230,6 +259,60 @@ private fun WeatherPanel(weather: FeedWeather?, place: FeedPlace?, loaded: Boole
                 weather.rain?.let { (chance, time) ->
                     val (h, m) = time.split(":").map(String::toInt)
                     Text("RAIN $chance% AFTER ${clock(h, m, use24h)}", color = style.muted, fontFamily = Mono, fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+/** Type a town and pick it from the list. Only the typed text leaves the Duo. */
+@Composable
+private fun PlaceSearch(style: FeedStyle, onPick: (PlaceMatch) -> Unit, onClose: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<PlaceMatch>?>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    fun finish(pick: PlaceMatch?) {
+        keyboard?.hide(); focusManager.clearFocus()
+        if (pick != null) onPick(pick) else onClose()
+    }
+    BackHandler { finish(null) }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(query) {
+        if (splitPlaceQuery(query).first.length < 2) { results = emptyList(); loading = false; return@LaunchedEffect }
+        loading = true
+        delay(300) // wait for a pause in typing
+        results = searchPlaces(query)
+        loading = false
+    }
+    val shape = RoundedCornerShape(10.dp)
+    BasicTextField(query, { query = it }, Modifier.padding(top = 8.dp).fillMaxWidth().focusRequester(focus).testTag("feed-weather-city-field"),
+        singleLine = true, textStyle = TextStyle(color = style.ink, fontSize = 14.sp), cursorBrush = SolidColor(style.signal),
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { results?.firstOrNull()?.let { finish(it) } }),
+        decorationBox = { field ->
+            Box(Modifier.fillMaxWidth().clip(shape).background(style.eventFill).border(1.dp, style.panelEdge, shape)
+                .padding(horizontal = 11.dp, vertical = 9.dp)) {
+                if (query.isEmpty()) Text("Town, like Erie, PA", color = style.muted, fontSize = 14.sp)
+                field()
+            }
+        })
+    val found = results
+    val enough = splitPlaceQuery(query).first.length >= 2
+    when {
+        found == null -> Text("Couldn't search right now. Check your connection and try again.", color = style.muted,
+            fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        found.isEmpty() && enough -> Text(if (loading) "Searching…" else "No towns found.", color = style.muted,
+            fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        else -> Column(Modifier.padding(top = 4.dp)) {
+            found.forEach { match ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { finish(match) }
+                    .padding(horizontal = 4.dp, vertical = 9.dp).testTag("feed-weather-city-result"),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(match.name, Modifier.weight(1f), color = style.ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(match.label, color = style.muted, fontSize = 12.sp, maxLines = 1)
                 }
             }
         }
