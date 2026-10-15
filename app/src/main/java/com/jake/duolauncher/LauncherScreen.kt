@@ -137,6 +137,7 @@ fun LauncherScreen(
     showFirstRun: Boolean = false,
     onFinishFirstRun: () -> Unit = {},
     onShadeSetup: () -> Unit = {},
+    unfoldReveal: Boolean = false,
 ) {
     var sheet by rememberSaveable { mutableStateOf("") }
     var dockSlot by rememberSaveable { mutableIntStateOf(0) }
@@ -415,7 +416,8 @@ fun LauncherScreen(
         LiveDiscover.homeLayer = homeLayer
         onDispose { if (LiveDiscover.homeLayer === homeLayer) LiveDiscover.homeLayer = null }
     }
-    Box(Modifier.fillMaxSize().graphicsLayer {
+    val unfoldProgress = UnfoldReveal.rememberProgress(unfoldReveal)
+    Box(Modifier.fillMaxSize().unfoldReveal(unfoldProgress).graphicsLayer {
         // The feed frame reuses the pager's render nodes in another window. Give Main
         // a complete render target so cross-window damage cannot erase stationary controls.
         compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen

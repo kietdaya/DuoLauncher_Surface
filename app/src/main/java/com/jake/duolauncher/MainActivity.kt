@@ -87,6 +87,8 @@ class MainActivity : ComponentActivity() {
         updateDefaultHome()
         if (savedInstanceState == null && intent.getStringExtra("duo_destination") == "search") searchRequests.intValue++
         intent.removeExtra("duo_destination")
+        // True only when this instance exists because the Duo just unfolded from one screen to both.
+        val unfoldReveal = UnfoldReveal.consume(this, resources.configuration.screenWidthDp)
         setContent {
             val state = model.state.collectAsStateWithLifecycle().value
             val deviceStatus = status.state.collectAsStateWithLifecycle().value
@@ -103,7 +105,8 @@ class MainActivity : ComponentActivity() {
                     onAppearanceClear = { cancelAppearanceLocation(); appearance.clearLocation(systemDark()) },
                     showFirstRun = showFirstRun.value,
                     onFinishFirstRun = ::finishFirstRun,
-                    onShadeSetup = ::showShadeSetup)
+                    onShadeSetup = ::showShadeSetup,
+                    unfoldReveal = unfoldReveal)
             }
         }
         FoldRenderExperiment.attach(this)
