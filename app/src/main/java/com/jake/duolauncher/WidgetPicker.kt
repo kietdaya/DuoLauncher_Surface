@@ -201,6 +201,7 @@ internal fun VisualWidgetPicker(
     onDrag: (Offset) -> Unit,
     onDrop: () -> Unit,
     onCancelDrag: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     val latestDragStart by rememberUpdatedState(onDragStart)
@@ -214,7 +215,7 @@ internal fun VisualWidgetPicker(
         words.isEmpty() || listOf(entry.appLabel, entry.providerLabel, entry.description,
             entry.provider.provider.packageName).any { it.lowercase().contains(words) }
     } }
-    Surface(Modifier.fillMaxSize().alpha(if (hiddenForDrag) 0f else 1f)
+    Surface(modifier.fillMaxSize().alpha(if (hiddenForDrag) 0f else 1f)
         .then(if (hiddenForDrag) Modifier.clearAndSetSemantics { }.focusProperties { canFocus = false } else Modifier)
         .testTag("visual-widget-picker"),
         color = Glass.copy(alpha = .96f)) {

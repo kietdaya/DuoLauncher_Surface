@@ -51,6 +51,26 @@ fun dualScreenSplit(boxWidth: Float, hingeLeft: Float, hingeRight: Float): DualS
     return DualScreenSplit(screenWidth = minOf(leftScreen, rightScreen), rightScreenStart = hingeRight)
 }
 
+/** A horizontal band of the Home content box, in dp: where Home's own full-screen panels are drawn. */
+data class HomePanelSpan(val start: Float, val width: Float)
+
+/**
+ * Where Home's full-screen panels (the widget picker and its placement toolbar) sit in a [boxWidth] dp
+ * Home box. When another app has the Duo's left screen, Home only owns the right one, so the panels stay
+ * there instead of stretching across the hinge under that app. Otherwise they use the whole box.
+ */
+fun homePanelSpan(boxWidth: Float, split: DualScreenSplit?, leftCovered: Boolean): HomePanelSpan =
+    if (split != null && leftCovered) HomePanelSpan(split.rightScreenStart, boxWidth - split.rightScreenStart)
+    else HomePanelSpan(0f, boxWidth)
+
+/**
+ * The Duo screen that system screens opened for Home (widget permission and widget settings) should use:
+ * true for the left screen when an app has only the right one, false for the right screen otherwise,
+ * and null when there is no hinge, so Android places them as usual.
+ */
+fun duoSetupScreenIsLeft(hasHinge: Boolean, leftCovered: Boolean, rightCovered: Boolean): Boolean? =
+    if (!hasHinge) null else rightCovered && !leftCovered
+
 /** Letters on the All apps index strip. */
 internal val IndexLetters = ('A'..'Z').map(Char::toString) + "#"
 

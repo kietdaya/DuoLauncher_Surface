@@ -475,6 +475,10 @@ fun LauncherScreen(
                     hingeLeft = (hinge.left - boxLeftPx) / density.density,
                     hingeRight = (hinge.right - boxLeftPx) / density.density)
             }
+            // The widget picker and placement toolbar stay on the screen Home owns, so they don't stretch
+            // across the hinge under an app that has the left screen.
+            val homePanel = homePanelSpan(maxWidth.value, split, leftCovered)
+            val homePanelArea = Modifier.offset(x = homePanel.start.dp).width(homePanel.width.dp).fillMaxHeight()
             val inLibrary = pager.currentPage == visibleHomePages
             var statusHeight by remember { mutableFloatStateOf(0f) }
             val geometry = homeGeometry(maxWidth.value, maxHeight.value, preset, state.labels,
@@ -771,6 +775,10 @@ fun LauncherScreen(
                             WidgetActions(placement, constraints,
                                 canConfigure = widgets.canReconfigure(placement.id),
                                 onConfigure = { widgets.reconfigure(placement.id); sheet = "" },
+                                background = if (placement.id >= 0) widgets.backgrounds[placement.id] else null,
+                                onBackground = if (placement.id >= 0) ({ value: WidgetBackground? ->
+                                    widgets.backgrounds.set(placement.id, value)
+                                }) else null,
                                 isValid = { x, y -> (x == placement.spanX && y == placement.spanY) || resizeWidget(state.layout, widgetSlot, x, y) != state.layout },
                                 onResize = { x, y -> model.resizeWidget(widgetSlot, x, y) },
                                 onStartResize = { x, y ->
@@ -846,6 +854,7 @@ fun LauncherScreen(
                     widgets.sizing(provider, pickerSizing)?.takeIf { it.minimumFitsGrid }?.preferred
                 }
                 VisualWidgetPicker(catalog, catalogProfiles.ifEmpty { listOf(selectedProfile) }, selectedProfile,
+                    modifier = homePanelArea,
                     onSelectProfile = { widgetProfileSerial = it.userSerial; widgetPlacementMessage = null },
                     onTurnOnWork = { model.turnOnWork(it) }, hiddenForDrag = widgetSession != null,
                     footprint = footprint,
@@ -961,39 +970,41 @@ fun LauncherScreen(
                                 cell?.let { widgetSession = session.copy(pointer = point, targetIndex = it.index) }
                             }
                         } else Modifier)) {
-                        Row(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 8.dp)
-                            .background(Glass.copy(alpha = .97f), RoundedCornerShape(22.dp))
-                            .testTag("widget-placement-toolbar"), verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = widgetPickerBack) { Text("Back to widgets") }
-                            if (session.candidate != null) Text("Replace here", color = Ink,
-                                modifier = Modifier.testTag("widget-replacement-locked"))
-                            val targetPage = homeCellPage(session.targetIndex ?: 0)
-                            if (!session.dragging && session.candidate == null) IconButton(
-                                enabled = targetPage > if (leadingUsable) -1 else 0, onClick = {
-                                val local = homeCellLocal(session.targetIndex ?: 0)
-                                val page = targetPage - 1
-                                widgetSession = session.copy(targetIndex = homeCellIndex(page, local))
-                                scope.launch { pager.animateScrollToPage(page.coerceAtLeast(0)) }
-                            }) { Icon(Icons.Rounded.ChevronLeft, "Previous home page") }
-                            Text("${session.span.width} × ${session.span.height}", color = Ink)
-                            if (!session.dragging && session.candidate == null) IconButton(enabled = targetPage < homePages, onClick = {
-                                val local = homeCellLocal(session.targetIndex ?: 0)
-                                val page = (targetPage + 1).coerceAtMost(homePages)
-                                widgetSession = session.copy(targetIndex = homeCellIndex(page, local))
-                                scope.launch { pager.animateScrollToPage(page.coerceAtLeast(0)) }
-                            }) { Icon(Icons.Rounded.ChevronRight, "Next home page") }
-                            if (!session.dragging) TextButton(enabled = widgetDraft != null, onClick = {
-                                widgetDraft?.let { draft ->
-                                    val contentSize = specialAnchor?.let { bounds -> with(placementDensity) {
-                                        WidgetContentSize(bounds.width.toDp().value, bounds.height.toDp().value)
-                                    } }
-                                    session.provider?.let { widgets.add(draft, it, pickerSizing, contentSize) }
-                                        ?: session.builtinId?.let { widgets.setBuiltin(draft.copy(id = it)) }
-                                    widgetSession = null; sheet = ""; widgetPackage = null
-                                }
-                            }, modifier = Modifier.testTag("widget-placement-apply")) { Text("Place") }
-                            TextButton(onClick = { leaveTemporaryWidgetPage(); widgetSession = null; sheet = ""; widgetPackage = null },
-                                modifier = Modifier.testTag("widget-placement-cancel")) { Text("Cancel") }
+                        Box(homePanelArea, contentAlignment = Alignment.TopCenter) {
+                            Row(Modifier.statusBarsPadding().padding(top = 8.dp)
+                                .background(Glass.copy(alpha = .97f), RoundedCornerShape(22.dp))
+                                .testTag("widget-placement-toolbar"), verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = widgetPickerBack) { Text("Back to widgets") }
+                                if (session.candidate != null) Text("Replace here", color = Ink,
+                                    modifier = Modifier.testTag("widget-replacement-locked"))
+                                val targetPage = homeCellPage(session.targetIndex ?: 0)
+                                if (!session.dragging && session.candidate == null) IconButton(
+                                    enabled = targetPage > if (leadingUsable) -1 else 0, onClick = {
+                                    val local = homeCellLocal(session.targetIndex ?: 0)
+                                    val page = targetPage - 1
+                                    widgetSession = session.copy(targetIndex = homeCellIndex(page, local))
+                                    scope.launch { pager.animateScrollToPage(page.coerceAtLeast(0)) }
+                                }) { Icon(Icons.Rounded.ChevronLeft, "Previous home page") }
+                                Text("${session.span.width} × ${session.span.height}", color = Ink)
+                                if (!session.dragging && session.candidate == null) IconButton(enabled = targetPage < homePages, onClick = {
+                                    val local = homeCellLocal(session.targetIndex ?: 0)
+                                    val page = (targetPage + 1).coerceAtMost(homePages)
+                                    widgetSession = session.copy(targetIndex = homeCellIndex(page, local))
+                                    scope.launch { pager.animateScrollToPage(page.coerceAtLeast(0)) }
+                                }) { Icon(Icons.Rounded.ChevronRight, "Next home page") }
+                                if (!session.dragging) TextButton(enabled = widgetDraft != null, onClick = {
+                                    widgetDraft?.let { draft ->
+                                        val contentSize = specialAnchor?.let { bounds -> with(placementDensity) {
+                                            WidgetContentSize(bounds.width.toDp().value, bounds.height.toDp().value)
+                                        } }
+                                        session.provider?.let { widgets.add(draft, it, pickerSizing, contentSize) }
+                                            ?: session.builtinId?.let { widgets.setBuiltin(draft.copy(id = it)) }
+                                        widgetSession = null; sheet = ""; widgetPackage = null
+                                    }
+                                }, modifier = Modifier.testTag("widget-placement-apply")) { Text("Place") }
+                                TextButton(onClick = { leaveTemporaryWidgetPage(); widgetSession = null; sheet = ""; widgetPackage = null },
+                                    modifier = Modifier.testTag("widget-placement-cancel")) { Text("Cancel") }
+                            }
                         }
                         if (anchor != null) {
                             val density = LocalDensity.current
@@ -1050,8 +1061,10 @@ fun LauncherScreen(
                     }
                 }
                 widgetPlacementMessage?.let { message ->
-                    Surface(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(20.dp),
-                        color = Glass, shape = RoundedCornerShape(18.dp)) { Text(message, Modifier.padding(16.dp), color = Ink) }
+                    Box(homePanelArea, contentAlignment = Alignment.BottomCenter) {
+                        Surface(Modifier.navigationBarsPadding().padding(20.dp),
+                            color = Glass, shape = RoundedCornerShape(18.dp)) { Text(message, Modifier.padding(16.dp), color = Ink) }
+                    }
                 }
             }
         }
@@ -1911,8 +1924,19 @@ private fun WidgetSlot(id: Int, slot: Int, controller: WidgetController, modifie
         if (info == null) fallback()
         else {
             key(id) {
-                AndroidView(factory = { context -> controller.host.createView(context, id, info) },
-                    modifier = Modifier.fillMaxSize())
+                val plate = controller.backgrounds[id]
+                Box(Modifier.fillMaxSize()) {
+                    // Option A glass plate: drawn by the launcher behind the widget, with the
+                    // widget's own background fill hidden so the plate shows through.
+                    if (plate != null) Box(Modifier.matchParentSize().testTag("widget-background-$slot")
+                        .background(Color(plate.color).copy(alpha = plate.opacity), RoundedCornerShape(24.dp)))
+                    AndroidView(factory = { context -> controller.host.createView(context, id, info) },
+                        update = { view -> setProviderBackgroundHidden(view, plate != null) },
+                        modifier = Modifier.fillMaxSize())
+                    // The dock's light glass edge, drawn over the widget so it stays visible on any content.
+                    if (plate != null) Box(Modifier.matchParentSize()
+                        .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(24.dp)))
+                }
             }
         }
     }
@@ -2103,6 +2127,9 @@ private fun WidgetActions(
     constraints: WidgetSpanConstraints?,
     canConfigure: Boolean,
     onConfigure: () -> Unit,
+    /** The widget's glass plate, and how to change it; [onBackground] is null for built-in cards. */
+    background: WidgetBackground?,
+    onBackground: ((WidgetBackground?) -> Unit)?,
     isValid: (Int, Int) -> Boolean,
     onResize: (Int, Int) -> Unit,
     onStartResize: (Int, Int) -> Unit,
@@ -2133,6 +2160,7 @@ private fun WidgetActions(
         }
         if (canConfigure) ActionRow(Icons.Rounded.Settings, "Widget settings", onConfigure,
             Modifier.testTag("widget-settings-${placement.slot}"))
+        if (onBackground != null) WidgetBackgroundPicker(background, onBackground, placement.slot)
         Text("Resize", style = MaterialTheme.typography.titleMedium)
         Button(enabled = feasible, onClick = { onStartResize(width, height) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Resize on Home") }
         if (!feasible) Text("Move this widget into the six-row grid before resizing.", color = MaterialTheme.colorScheme.error)
@@ -2172,5 +2200,42 @@ private fun WidgetActions(
         HorizontalDivider()
         ActionRow(Icons.Rounded.DeleteOutline, "Remove", onRemove, tint = MaterialTheme.colorScheme.error)
         Spacer(Modifier.height(12.dp))
+    }
+}
+
+/** Widget options: a glass plate colour (or Off) and its opacity. Changes show on Home as you pick. */
+@Composable
+private fun WidgetBackgroundPicker(background: WidgetBackground?, onChange: (WidgetBackground?) -> Unit, slot: Int) {
+    Text("Background", style = MaterialTheme.typography.titleMedium)
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("widget-background-swatches-$slot"),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        BackgroundSwatch("Off", null, selected = background == null) { onChange(null) }
+        WidgetBackgroundSwatches.forEach { (name, color) ->
+            BackgroundSwatch(name, color, selected = background?.color == color) {
+                onChange(WidgetBackground(color, background?.opacity ?: DEFAULT_WIDGET_BACKGROUND_OPACITY))
+            }
+        }
+    }
+    if (background != null) Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Opacity", Modifier.width(72.dp))
+        Slider(value = background.opacity, onValueChange = { onChange(background.copy(opacity = it.coerceIn(0f, 1f))) },
+            valueRange = 0f..1f, modifier = Modifier.weight(1f).testTag("widget-background-opacity-$slot"))
+        Text("${(background.opacity * 100).roundToInt()}%", Modifier.width(48.dp), textAlign = TextAlign.End)
+    }
+    else Text("Off keeps the widget's own background.", style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun BackgroundSwatch(name: String, color: Int?, selected: Boolean, onClick: () -> Unit) {
+    val ring = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick)
+        .semantics { contentDescription = "$name background"; stateDescription = if (selected) "Selected" else "" },
+        contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp).clip(CircleShape)
+            .then(if (color != null) Modifier.background(Color(color)) else Modifier)
+            .border(if (selected) 3.dp else 1.dp, ring, CircleShape), contentAlignment = Alignment.Center) {
+            if (color == null) Icon(Icons.Rounded.Block, null, tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp))
+        }
     }
 }

@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
         appearance = AppearanceStore(this)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
-        widgets = WidgetController(this, model) { active ->
+        widgets = WidgetController(this, model, setupBounds = ::widgetSetupBounds) { active ->
             LiveDiscover.setExternalResultPending(this, "main", "widget-setup", active)
         }.also { it.restore(savedInstanceState) }
         backups = BackupController(this, model, widgets) { active ->
@@ -321,11 +321,22 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Launch options that open on the left (true) or right (false) Duo screen; null when not on a Duo. */
-    internal fun duoLaunchOptions(left: Boolean?): Bundle? {
+    internal fun duoLaunchOptions(left: Boolean?): Bundle? =
+        duoScreenBounds(left)?.let { android.app.ActivityOptions.makeBasic().setLaunchBounds(it).toBundle() }
+
+    /** The left (true) or right (false) Duo screen as launch bounds; null when not on a Duo. */
+    internal fun duoScreenBounds(left: Boolean?): android.graphics.Rect? {
         val hinge = CurrentDuoHinge.value ?: return null
         val x = when (left) { true -> 0; false -> hinge.right; null -> return null }
-        return duoScreenAt(x)?.let { android.app.ActivityOptions.makeBasic().setLaunchBounds(it).toBundle() }
+        return duoScreenAt(x)
     }
+
+    /** Widget permission and settings screens open on the screen Home is using, not across both. */
+    private fun widgetSetupBounds(): android.graphics.Rect? = duoScreenBounds(duoSetupScreenIsLeft(
+        hasHinge = CurrentDuoHinge.value != null,
+        leftCovered = DuoScreenCoverage.left.value,
+        rightCovered = DuoScreenCoverage.right.value,
+    ))
     private fun openGoogleSearch(bounds: android.graphics.Rect?): Boolean = try {
         startActivity(googleSearchIntent().apply { sourceBounds = screenBounds(bounds) }, launchOptions(bounds))
         true

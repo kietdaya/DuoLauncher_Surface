@@ -6,12 +6,14 @@ import android.appwidget.AppWidgetProviderInfo
 import android.content.Intent
 import android.content.ComponentName
 import android.content.pm.LauncherApps
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.Process
 import android.os.UserHandle
 import android.os.UserManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityOptionsCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -24,10 +26,17 @@ enum class WidgetSetupStatus { BINDING, CONFIGURING }
 class WidgetController(
     private val activity: ComponentActivity,
     private val model: LauncherModel,
+    /**
+     * The screen area widget permission and settings screens should open in, or null to let Android
+     * choose. On a Surface Duo this keeps them on Home's screen instead of across both screens.
+     */
+    private val setupBounds: () -> Rect? = { null },
     private val onExternalSetupChanged: (Boolean) -> Unit = {},
 ) {
     val host: android.appwidget.AppWidgetHost = ZeroPaddingWidgetHost(activity, 1024)
     val manager = AppWidgetManager.getInstance(activity)
+    /** Glass plates the launcher draws behind native widgets, chosen in Widget options. */
+    val backgrounds = WidgetBackgroundStore(activity)
     private val launcherApps = activity.getSystemService(LauncherApps::class.java)
     var failureMessage by mutableStateOf<String?>(null)
         private set
@@ -205,7 +214,7 @@ class WidgetController(
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingId)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, provider.provider)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER_PROFILE, provider.profile)
-                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_OPTIONS, pendingOptions))
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_OPTIONS, pendingOptions), bindOptions())
             }
         } catch (_: Exception) { fail() }
     }
@@ -223,7 +232,7 @@ class WidgetController(
             setupStatus = WidgetSetupStatus.CONFIGURING
             persistPending()
             onExternalSetupChanged(true)
-            host.startAppWidgetConfigureActivityForResult(activity, pendingId, 0, CONFIGURE, null)
+            host.startAppWidgetConfigureActivityForResult(activity, pendingId, 0, CONFIGURE, setupOptions())
         }
         catch (_: Exception) { fail() }
     }
@@ -259,6 +268,7 @@ class WidgetController(
         if (!model.canPruneWidgetIds) return
         val retained = model.retainedWidgetIds + pendingId + listOfNotNull(reconfigureWidgetId)
         host.appWidgetIds.filter { it !in retained }.forEach(host::deleteAppWidgetId)
+        backgrounds.retainOnly(retained.toSet())
     }
 
     private fun cancel() {
@@ -281,7 +291,7 @@ class WidgetController(
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingId)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, provider)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER_PROFILE, profile)
-                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_OPTIONS, pendingOptions))
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_OPTIONS, pendingOptions), bindOptions())
             } catch (_: Exception) { fail() }
         }
     }
@@ -324,7 +334,7 @@ class WidgetController(
         }
         onExternalSetupChanged(true)
         return try {
-            host.startAppWidgetConfigureActivityForResult(activity, id, 0, RECONFIGURE, null)
+            host.startAppWidgetConfigureActivityForResult(activity, id, 0, RECONFIGURE, setupOptions())
             true
         } catch (_: Exception) {
             failureMessage = "This widget could not open its settings."
@@ -338,6 +348,12 @@ class WidgetController(
         reconfigureStore.edit().clear().apply()
         if (notify) onExternalSetupChanged(false)
     }
+
+    private fun currentSetupBounds(): Rect? = runCatching { setupBounds() }.getOrNull()?.takeUnless { it.isEmpty }
+    private fun bindOptions(): ActivityOptionsCompat? =
+        currentSetupBounds()?.let { ActivityOptionsCompat.makeBasic().setLaunchBounds(it) }
+    private fun setupOptions(): Bundle? =
+        currentSetupBounds()?.let { android.app.ActivityOptions.makeBasic().setLaunchBounds(it).toBundle() }
 
     private fun writePlacement(bundle: Bundle, key: String, value: WidgetPlacement) {
         bundle.putIntArray(key, intArrayOf(value.slot, value.id, value.page, value.column, value.row, value.spanX, value.spanY))

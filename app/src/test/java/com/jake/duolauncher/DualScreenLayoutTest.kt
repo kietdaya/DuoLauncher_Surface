@@ -55,6 +55,29 @@ class DualScreenLayoutTest {
         assertEquals(split.rightScreenStart, libraryOnScreen, 0.01f)
     }
 
+    @Test fun `widget panels stay on the right screen when an app has the left one`() {
+        val panel = homePanelSpan(boxWidth, split, leftCovered = true)
+        assertEquals(split.rightScreenStart, panel.start, 0f)
+        assertEquals(boxWidth - split.rightScreenStart, panel.width, 0.01f)
+        // Never reaches back under the hinge.
+        assertTrue(panel.start >= hingeRight - 0.01f)
+    }
+
+    @Test fun `widget panels use the whole box when Home has both screens or no hinge`() {
+        assertEquals(HomePanelSpan(0f, boxWidth), homePanelSpan(boxWidth, split, leftCovered = false))
+        assertEquals(HomePanelSpan(0f, boxWidth), homePanelSpan(boxWidth, null, leftCovered = true))
+    }
+
+    @Test fun `widget setup screens open on the screen Home is using`() {
+        assertNull(duoSetupScreenIsLeft(hasHinge = false, leftCovered = false, rightCovered = true))
+        // An app on the right screen: Home, and its setup screens, are on the left.
+        assertEquals(true, duoSetupScreenIsLeft(hasHinge = true, leftCovered = false, rightCovered = true))
+        // An app on the left screen, both screens free, or both covered: the right screen.
+        assertEquals(false, duoSetupScreenIsLeft(hasHinge = true, leftCovered = true, rightCovered = false))
+        assertEquals(false, duoSetupScreenIsLeft(hasHinge = true, leftCovered = false, rightCovered = false))
+        assertEquals(false, duoSetupScreenIsLeft(hasHinge = true, leftCovered = true, rightCovered = true))
+    }
+
     @Test fun `upstream layout is unchanged without a hinge`() {
         val upstream = homeGeometry(boxWidth, 720f, preset, labels = true)
         assertEquals(minOf(460f, boxWidth * 0.56f), upstream.homeWidth, 0f)
