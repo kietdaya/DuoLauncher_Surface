@@ -8,6 +8,7 @@ import android.content.Context
 import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.util.SizeF
+import android.util.SparseIntArray
 import android.view.MotionEvent
 import android.view.View
 import android.widget.RemoteViews
@@ -20,6 +21,29 @@ internal class ZeroPaddingWidgetHost(context: Context, hostId: Int) : AppWidgetH
 }
 
 /**
+ * The launcher's widget palette: one graphite-to-warm-white ramp in Android's 13 tonal steps
+ * (0, 10, 50, 100 … 900, 1000). Widgets that colour themselves from Android's dynamic palette, such as
+ * Google Keep, then use the dock's monochrome KO II look instead of the system's default purple and blue.
+ */
+private val WidgetTones = longArrayOf(
+    0xFFFFFFFF, 0xFFFAF9F6, 0xFFF5F4F0, 0xFFF3F2EE, 0xFFECEBE6, 0xFFC9C8C3, 0xFFA3A29E,
+    0xFF7F7E7A, 0xFF5C5C59, 0xFF2C2E33, 0xFF1C1D1F, 0xFF141518, 0xFF000000,
+)
+
+/** Every system accent and neutral colour, in [WidgetTones] order per ramp. */
+private val SystemPaletteColors = intArrayOf(
+    android.R.color.system_accent1_0, android.R.color.system_accent1_10, android.R.color.system_accent1_50, android.R.color.system_accent1_100, android.R.color.system_accent1_200, android.R.color.system_accent1_300, android.R.color.system_accent1_400, android.R.color.system_accent1_500, android.R.color.system_accent1_600, android.R.color.system_accent1_700, android.R.color.system_accent1_800, android.R.color.system_accent1_900, android.R.color.system_accent1_1000,
+    android.R.color.system_accent2_0, android.R.color.system_accent2_10, android.R.color.system_accent2_50, android.R.color.system_accent2_100, android.R.color.system_accent2_200, android.R.color.system_accent2_300, android.R.color.system_accent2_400, android.R.color.system_accent2_500, android.R.color.system_accent2_600, android.R.color.system_accent2_700, android.R.color.system_accent2_800, android.R.color.system_accent2_900, android.R.color.system_accent2_1000,
+    android.R.color.system_accent3_0, android.R.color.system_accent3_10, android.R.color.system_accent3_50, android.R.color.system_accent3_100, android.R.color.system_accent3_200, android.R.color.system_accent3_300, android.R.color.system_accent3_400, android.R.color.system_accent3_500, android.R.color.system_accent3_600, android.R.color.system_accent3_700, android.R.color.system_accent3_800, android.R.color.system_accent3_900, android.R.color.system_accent3_1000,
+    android.R.color.system_neutral1_0, android.R.color.system_neutral1_10, android.R.color.system_neutral1_50, android.R.color.system_neutral1_100, android.R.color.system_neutral1_200, android.R.color.system_neutral1_300, android.R.color.system_neutral1_400, android.R.color.system_neutral1_500, android.R.color.system_neutral1_600, android.R.color.system_neutral1_700, android.R.color.system_neutral1_800, android.R.color.system_neutral1_900, android.R.color.system_neutral1_1000,
+    android.R.color.system_neutral2_0, android.R.color.system_neutral2_10, android.R.color.system_neutral2_50, android.R.color.system_neutral2_100, android.R.color.system_neutral2_200, android.R.color.system_neutral2_300, android.R.color.system_neutral2_400, android.R.color.system_neutral2_500, android.R.color.system_neutral2_600, android.R.color.system_neutral2_700, android.R.color.system_neutral2_800, android.R.color.system_neutral2_900, android.R.color.system_neutral2_1000,
+)
+
+private val WidgetColorResources = SparseIntArray(SystemPaletteColors.size).apply {
+    SystemPaletteColors.forEachIndexed { index, id -> put(id, WidgetTones[index % WidgetTones.size].toInt()) }
+}
+
+/**
  * Hides or restores the provider's own background fill on a widget view from [ZeroPaddingWidgetHost], so a
  * launcher glass plate behind it shows through. Other views are left alone.
  */
@@ -29,6 +53,8 @@ internal fun setProviderBackgroundHidden(view: View, hidden: Boolean) {
 
 private class ZeroPaddingWidgetHostView(context: Context) : AppWidgetHostView(context) {
     private var providerOwnsVerticalGesture = false
+
+    init { setColorResources(WidgetColorResources) }
 
     /**
      * When true, the view the provider marks `@android:id/background` (Android 12's convention for a
